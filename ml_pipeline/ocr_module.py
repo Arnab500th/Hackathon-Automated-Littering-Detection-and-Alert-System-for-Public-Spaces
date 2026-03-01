@@ -61,7 +61,7 @@ def apply_soft_correction(text: str) -> str:
     # The last 4 are almost always digits
     for i in range(max(4, len(corrected) - 4), len(corrected)):
         if corrected[i] == 'O': corrected[i] = '0'
-        elif corrected[i] == 'I': int_replacement = '1'
+        elif corrected[i] == 'I': corrected[i] = '1'
         elif corrected[i] == 'S': corrected[i] = '5'
         elif corrected[i] == 'B': corrected[i] = '8'
         elif corrected[i] == 'Z': corrected[i] = '2'
@@ -164,62 +164,3 @@ def read_license_plate_from_frame(frame, vehicle_box):
     crop = frame[y1:y2, x1:x2]
     return read_license_plate_from_crop(crop)
 
-
-if __name__ == "__main__":
-    print("\n" + "="*50)
-    print("  EasyOCR License Plate Reader")
-    print("="*50)
-
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-        if os.path.isdir(path):
-            images = [f for f in os.listdir(path)
-                      if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-            print(f"Testing folder: {path} ({len(images)} images)")
-            for img_file in images:
-                full_path = os.path.join(path, img_file)
-                print(f"\n--- {img_file} ---")
-                res = read_license_plate_from_image(full_path)
-                print(f"Result: {res if res else 'FAILED'}")
-        else:
-            print(f"Testing: {path}")
-            res = read_license_plate_from_image(path)
-            print(f"\nFinal Result: {res if res else 'No plate detected'}")
-
-    else:
-        print("\nNo image given - using webcam")
-        print("Press SPACE to capture | Q to quit")
-
-        cam = cv2.VideoCapture(0)
-        if not cam.isOpened():
-            print("ERROR: Cannot open webcam")
-            exit()
-
-        while True:
-            ret, frame = cam.read()
-            if not ret:
-                break
-
-            cv2.putText(frame, "SPACE to read | Q to quit",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7, (0, 255, 255), 2)
-            cv2.imshow("OCR Test", frame)
-            key = cv2.waitKey(1) & 0xFF
-
-            if key == ord('q'):
-                break
-            elif key == ord(' '):
-                print("\n[TEST] Capturing...")
-                result = read_license_plate_from_crop(frame)
-                print(f"[TEST] Result: {result if result else 'Nothing detected'}")
-                display = frame.copy()
-                text    = result if result else "NOT DETECTED"
-                color   = (0, 255, 0) if result else (0, 0, 255)
-                cv2.putText(display, f"PLATE: {text}",
-                            (frame.shape[1]//2 - 150, frame.shape[0]//2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
-                cv2.imshow("OCR Test", display)
-                cv2.waitKey(2000)
-
-        cam.release()
-        cv2.destroyAllWindows()

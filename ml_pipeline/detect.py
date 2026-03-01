@@ -321,12 +321,7 @@ def run_trash_detection(frame, persons, vehicles):
     """
     global last_drawn_trash
 
-    trash_detection = trash_model.track(
-        frame,
-        persist=True,
-        tracker="bytetrack.yaml",
-        verbose=False
-    )[0]
+    trash_detection = trash_model.track(frame, persist=True,tracker="bytetrack.yaml",verbose=False)[0]
 
     trash_boxes  = []
     trash_labels = []
@@ -484,7 +479,7 @@ while True:
         y += 18
 
     cv2.imshow("LitterWatch", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(10) & 0xFF == ord('q'):
         break
 
 # Cleanup
