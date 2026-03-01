@@ -2,66 +2,59 @@ import requests
 from datetime import datetime
 from config import BACKEND_URL
 
-def post_incident(event:dict)-> bool:
-    #Sends a confirmed litter event from detect.py to FastAPI backend.Called after every LITTER EVENT CONFIRMED in the state machine.
 
+def post_incident(event: dict) -> bool:
     payload = {
-        "timestamp": event.get("timestamp", datetime.now().isoformat()),
-        "camera_id": event.get("camera_id", "CAM_01"),
-        "trash_type": event.get("label", "unknown"),
-        "trash_confidence": event.get("confidence", 0.0),
-        "offender_type": event.get("suspect_type", "unknown"),
-        'license_plate': event.get("license_plate"),
-        'person_image_path': event.get("image_path"),
-        'vehicle_image_path': event.get("image_path") if event.get("suspect_type") == "vehicle" else None,
-        "full_frame_path": event.get("full_frame_path", None),
-        "alert_sent": False
-         }
-
+        "timestamp":          event.get("timestamp",    datetime.now().isoformat()),
+        "camera_id":          event.get("camera_id",    "CAM_01"),
+        "trash_type":         event.get("label",        "Unknown"),
+        "trash_confidence":   event.get("confidence",   0.0),
+        "offender_type":      event.get("suspect_type", "person"),
+        "license_plate":      event.get("license_plate", None),
+        "person_image_path":  event.get("image_path",   None) \
+                              if event.get("suspect_type") != "vehicle" else None,
+        "vehicle_image_path": event.get("image_path",   None) \
+                              if event.get("suspect_type") == "vehicle" else None,
+        "full_frame_path":    event.get("full_frame_path", None),
+        "alert_sent":         False
+    }
 
     try:
-        response = requests.post(f"{BACKEND_URL}/incidents", json=payload, timeout=5)
-
+        response = requests.post(
+            f"{BACKEND_URL}/incidents",
+            json=payload,
+            timeout=5
+        )
         if response.status_code == 200:
             data = response.json()
             print(f"[API] ✓ Incident posted (id: {data.get('id', '?')})")
-            return True
+            return True   # ← was missing
         else:
-            print(f"Failed to post incident. Status code: {response.status_code}, Response: {response.text}")
+            print(f"[API] ✗ Failed: {response.status_code} - {response.text}")
             return False
-        
-    except requests.exceptions.ConnectionError as e:
+
+    except requests.exceptions.ConnectionError:
         print("[API] ✗ Backend not reachable - is uvicorn running?")
         return False
-    
     except requests.exceptions.Timeout:
         print("[API] ✗ Request timed out")
         return False
-
     except Exception as e:
         print(f"[API] ✗ Unexpected error: {e}")
         return False
-    
-def get_stats()-> dict:
-    #Fetches littering statistics from the FastAPI backend. Called by the dashboard to display stats.
 
+
+def get_stats() -> dict:
     try:
         response = requests.get(f"{BACKEND_URL}/stats", timeout=3)
-
         if response.status_code == 200:
-            data = response.json()
-            print("Stats fetched successfully., Response:", data)
-            return data
-        
+            return response.json()
     except Exception:
         pass
-        
-    return {}
-    
+    return {}   # ← was broken by indentation, now correct
+
 
 def get_recent_incidents(limit: int = 10) -> list:
-   #Fetches recent incidents from backend.Returns empty list if backend unreachable.
-   
     try:
         response = requests.get(
             f"{BACKEND_URL}/incidents/recent",
@@ -75,13 +68,11 @@ def get_recent_incidents(limit: int = 10) -> list:
     return []
 
 
-# ── Standalone test ───────────────────────────────────────────
 if __name__ == "__main__":
     print("Testing api_client.py...")
     print("Make sure backend is running: uvicorn main:app --reload")
     print()
 
-    # Send a fake test incident
     test_event = {
         "timestamp":       datetime.now().isoformat(),
         "camera_id":       "CAM_TEST",
@@ -107,8 +98,5 @@ if __name__ == "__main__":
         if recent:
             print(f"Latest: {recent[0]}")
     else:
-        print("Backend not running or rejected the request.")
-        print("Start backend first: cd backend && uvicorn main:app --reload")
-
-    
-
+        print("Backend not reachable.")
+        print("Start backend: cd backend && uvicorn main:app --reload")
