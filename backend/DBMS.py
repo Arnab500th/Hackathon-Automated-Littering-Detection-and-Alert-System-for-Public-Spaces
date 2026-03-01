@@ -27,3 +27,11 @@ class Vehicle(Base):
     first_seen     = Column(DateTime)
     last_seen      = Column(DateTime)
     incident_count = Column(Integer, default=1)
+
+class TrashLog(Base):
+    __tablename__ = 'trash_log'
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp  = Column(DateTime, server_default=func.now())
+    camera_id  = Column(String(50))
+    trash_type = Column(String(60))

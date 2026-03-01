@@ -19,3 +19,8 @@ class VehicleSchema(BaseModel):
     first_seen:     datetime
     last_seen:      datetime
     incident_count: int = 1
+
+class TrashLogSchema(BaseModel):
+    timestamp:  datetime
+    camera_id:  str
+    trash_type: str

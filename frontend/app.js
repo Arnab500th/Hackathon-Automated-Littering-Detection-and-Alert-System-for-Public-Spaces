@@ -27,11 +27,13 @@ function showPage(name, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  el.classList.add('active');
+  if(el) el.classList.add('active');
 
   if (name === 'incidents') loadIncidents();
   if (name === 'vehicles')  loadVehicles();
   if (name === 'stream')    renderCameraGrid();
+  if (name === 'dashboard') { loadStats(); loadRecentIncidents(); loadHistory(); }
+  if (name === 'live-stats') loadLiveStats();
 }
 
 // ── Connection status ─────────────────────────────────────────
@@ -64,15 +66,17 @@ async function loadStats() {
     const data = await apiFetch('/stats');
     setConnected(true);
 
-    document.getElementById('stat-total').textContent    = data.total_incidents   ?? '0';
-    document.getElementById('stat-persons').textContent  = data.person_offenders  ?? '0';
-    document.getElementById('stat-vehicles').textContent = data.vehicle_offenders ?? '0';
-    document.getElementById('sb-total').textContent      = data.total_incidents   ?? '0';
-    document.getElementById('sb-persons').textContent    = data.person_offenders  ?? '0';
-    document.getElementById('sb-vehicles').textContent   = data.vehicle_offenders ?? '0';
+    document.getElementById('stat-total').textContent       = data.total_incidents   ?? '0';
+    document.getElementById('stat-total-trash').textContent = data.total_trash       ?? '0';
+    document.getElementById('stat-persons').textContent     = data.person_offenders  ?? '0';
+    document.getElementById('stat-vehicles').textContent    = data.vehicle_offenders ?? '0';
+    
+    document.getElementById('sb-total').textContent         = data.total_incidents   ?? '0';
+    document.getElementById('sb-persons').textContent       = data.person_offenders  ?? '0';
+    document.getElementById('sb-vehicles').textContent      = data.vehicle_offenders ?? '0';
 
-    renderTrashBars(data.by_trash_type || {});
-    renderZoneHeatmap(data.by_camera   || {});
+    updatePieChart(data.by_trash_type || {});
+    await loadActiveCameras();
 
     // New incident toast
     const total = data.total_incidents || 0;
@@ -80,12 +84,94 @@ async function loadStats() {
       showToast('⚠ NEW INCIDENT',
         `${total - lastIncidentCount} new litter event(s) detected`);
       loadRecentIncidents();
+      loadHistory();
     }
     lastIncidentCount = total;
 
   } catch (e) {
     setConnected(false);
   }
+}
+
+async function loadActiveCameras() {
+  try {
+    const data = await apiFetch('/cameras/active');
+    const cams = data.cameras || [];
+    document.getElementById('active-cam-count').textContent = cams.length;
+    
+    const list = document.getElementById('active-cam-list');
+    if (cams.length === 0) {
+      list.innerHTML = '<div class="no-data">No cameras online</div>';
+      return;
+    }
+    
+    list.innerHTML = cams.map(c => `
+      <div class="cam-item">
+        <div class="cam-dot"></div>
+        <div class="cam-info">
+          <div class="cam-id">${c.id}</div>
+          <div class="cam-time">pinged ${fmtTime(c.last_ping)}</div>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) { /* silent */ }
+}
+
+let historyChartInstance = null;
+async function loadHistory() {
+  try {
+    const data = await apiFetch('/stats/history');
+    const ctx = document.getElementById('historyBarChart');
+    if(!ctx) return;
+    
+    if (historyChartInstance) {
+      historyChartInstance.data.labels = data.labels;
+      historyChartInstance.data.datasets[0].data = data.incidents;
+      historyChartInstance.data.datasets[1].data = data.trash;
+      historyChartInstance.update();
+      return;
+    }
+    
+    historyChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.labels,
+        datasets: [
+          {
+            label: 'Confirmed Incidents',
+            data: data.incidents,
+            backgroundColor: '#ff3366',
+            borderRadius: 4
+          },
+          {
+            label: 'Total Trash Spotted',
+            data: data.trash,
+            backgroundColor: '#00d2ff',
+            borderRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#a1a1aa', font: {family: 'JetBrains Mono'} } }
+        },
+        scales: {
+          y: { 
+            beginAtZero: true, 
+            grid: { color: '#27272a' },
+            ticks: { color: '#a1a1aa', font: {family: 'JetBrains Mono'} }
+          },
+          x: { 
+            grid: { display: false },
+            ticks: { color: '#a1a1aa', font: {family: 'JetBrains Mono'} }
+          }
+        }
+      }
+    });
+
+  } catch(e) { /* silent */ }
 }
 
 // ── Load vehicles ─────────────────────────────────────────────
@@ -122,6 +208,7 @@ async function loadIncidents() {
 // ── Load everything ───────────────────────────────────────────
 async function loadAll() {
   await loadStats();
+  await loadHistory();
   await loadRecentIncidents();
   await loadVehicles();
 }
@@ -221,52 +308,79 @@ function renderVehiclesTable(rows) {
   `).join('');
 }
 
-function renderTrashBars(byType) {
-  const el      = document.getElementById('trash-bars');
-  const entries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
-  if (entries.length === 0) {
-    el.innerHTML = '<div class="no-data">No data yet</div>';
+let pieChartInstance = null;
+function updatePieChart(byType) {
+  const ctx = document.getElementById('trashPieChart');
+  if(!ctx) return;
+  
+  const labels = Object.keys(byType);
+  const data = Object.values(byType);
+  
+  if (pieChartInstance) {
+    pieChartInstance.data.labels = labels;
+    pieChartInstance.data.datasets[0].data = data;
+    pieChartInstance.update();
     return;
   }
-  const max = Math.max(...entries.map(e => e[1]));
-  el.innerHTML = entries.map(([label, count]) => `
-    <div class="bar-row">
-      <div class="bar-label-row">
-        <span>${label}</span><span>${count}</span>
-      </div>
-      <div class="bar-track">
-        <div class="bar-fill" style="width:${(count / max * 100).toFixed(1)}%"></div>
-      </div>
-    </div>
-  `).join('');
+  
+  pieChartInstance = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: [
+          '#00d2ff', '#ff3366', '#ffaa00', '#00ffaa', '#8833ff'
+        ],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#a1a1aa', font: {family: 'JetBrains Mono', size: 11} }
+        }
+      }
+    }
+  });
 }
 
-function renderZoneHeatmap(byCamera) {
-  const el    = document.getElementById('zone-grid');
-  const zones = [
-    'Top-Left', 'Top-Center', 'Top-Right',
-    'Bot-Left', 'Bot-Center', 'Bot-Right'
-  ];
-  // Wire to real zone data if /scene endpoint added later
-  // For now renders camera breakdown remapped to zones
-  const keys   = Object.keys(byCamera);
-  const counts = zones.reduce((acc, z, i) => {
-    const cam = keys[i];
-    acc[z] = cam ? (byCamera[cam] || 0) : 0;
-    return acc;
-  }, {});
-  const max = Math.max(...Object.values(counts), 1);
-
-  el.innerHTML = zones.map(z => {
-    const c    = counts[z];
-    const heat = c >= max * 0.7 ? 'hot' : c >= max * 0.3 ? 'med' : '';
-    return `
-      <div class="zone-cell ${heat}">
-        <span class="zone-name">${z}</span>
-        <span class="zone-count ${heat}">${c}</span>
+// ── Live Stats Tab ────────────────────────────────────────────
+async function loadLiveStats() {
+  try {
+    const data = await apiFetch('/cameras/active');
+    const cams = data.cameras || [];
+    const container = document.getElementById('live-stats-container');
+    
+    if (cams.length === 0) {
+      container.innerHTML = '<div class="no-data">No cameras are currently online providing data.</div>';
+      return;
+    }
+    
+    container.innerHTML = cams.map(c => `
+      <div class="panel cam-stat-card">
+        <div class="cam-stat-header">
+          <span class="live-dot" style="background:var(--ok)"></span>
+          ${c.id}
+        </div>
+        <div class="cam-stat-body" style="display:flex; gap:16px;">
+          <img src="${API}/stream/${c.id}" style="width:200px; height:120px; object-fit:cover; border:1px solid #3f3f46; border-radius:4px" onerror="this.src=''; this.alt='Stream Offline'"/>
+          <div style="flex:1">
+            <div style="font-family:var(--font-mono); font-size:12px; color:var(--muted); margin-bottom:8px">Details & Output</div>
+            <div style="font-size:14px; margin-bottom:4px">Last ping: <span style="color:var(--ok)">${fmtTime(c.last_ping)}</span></div>
+            <div style="font-size:14px; margin-bottom:4px">Status: Processing</div>
+            <div style="font-family:var(--font-mono); font-size:11px; margin-top:12px; color:var(--muted)">[Live feeds available in the Stream tab]</div>
+          </div>
+        </div>
       </div>
-    `;
-  }).join('');
+    `).join('');
+    
+  } catch(e) {
+    console.error(e);
+  }
 }
 
 // ── Multi-camera stream ───────────────────────────────────────
@@ -358,8 +472,16 @@ function showToast(title, body) {
 }
 
 // ── Auto-refresh every 5 seconds ──────────────────────────────
-setInterval(loadStats,          5000);
-setInterval(loadRecentIncidents, 5000);
+setInterval(() => {
+  loadStats();
+  loadRecentIncidents();
+  // We don't poll loadHistory() every 5s since it's a 7-day view, updated on new incident
+  
+  const activePage = document.querySelector('.page.active');
+  if (activePage && activePage.id === 'page-live-stats') {
+    loadLiveStats();
+  }
+}, 5000);
 
 // ── Init ──────────────────────────────────────────────────────
 loadAll();

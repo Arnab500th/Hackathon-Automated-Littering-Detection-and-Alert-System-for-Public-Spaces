@@ -6,6 +6,7 @@
 <title>Trash Detection — Surveillance Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -41,6 +42,10 @@
     <div class="nav-item active" onclick="showPage('dashboard', this)">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('live-stats', this)">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Live Stats
     </div>
     <div class="nav-item" onclick="showPage('stream', this)">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
@@ -78,6 +83,11 @@
           <div class="card-sub">all time</div>
         </div>
         <div class="card">
+          <div class="card-label">Total Trash</div>
+          <div class="card-value" id="stat-total-trash">—</div>
+          <div class="card-sub">objects spotted</div>
+        </div>
+        <div class="card">
           <div class="card-label">Person Offenders</div>
           <div class="card-value" id="stat-persons">—</div>
           <div class="card-sub">pedestrians</div>
@@ -86,11 +96,6 @@
           <div class="card-label">Vehicle Offenders</div>
           <div class="card-value" id="stat-vehicles">—</div>
           <div class="card-sub">with plate OCR</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Unique Vehicles</div>
-          <div class="card-value" id="stat-unique-v">—</div>
-          <div class="card-sub">in database</div>
         </div>
       </div>
 
@@ -120,17 +125,43 @@
             <div class="panel-header">
               <span class="panel-title">Trash Types</span>
             </div>
-            <div class="bar-list" id="trash-bars">
-              <div class="no-data">No data</div>
+            <div style="position: relative; height: 200px; width: 100%;">
+              <canvas id="trashPieChart"></canvas>
             </div>
           </div>
 
           <div class="panel">
             <div class="panel-header">
-              <span class="panel-title">Zone Heatmap</span>
+              <span class="panel-title">Active Cameras (<span id="active-cam-count">0</span>)</span>
             </div>
-            <div class="zone-grid" id="zone-grid"></div>
+            <div class="cam-list" id="active-cam-list">
+              <div class="no-data">No cameras online</div>
+            </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Full width chart below -->
+      <div class="panel" style="margin-top: 24px;">
+        <div class="panel-header">
+          <span class="panel-title">7-Day History</span>
+        </div>
+        <div style="position: relative; height: 250px; width: 100%;">
+          <canvas id="historyBarChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE STATS PAGE -->
+    <div class="page" id="page-live-stats">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Live Camera Statistics</span>
+          <button class="btn" onclick="loadLiveStats()">↻ Refresh</button>
+        </div>
+        <div class="live-stats-grid" id="live-stats-container">
+          <!-- Populated by JS for each active camera -->
+          <div class="no-data">Fetching live metrics...</div>
         </div>
       </div>
     </div>
