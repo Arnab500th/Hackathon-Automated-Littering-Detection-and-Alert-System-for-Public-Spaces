@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Trash Detection — Surveillance Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <span class="lightbox-close">✕</span>
+  <img id="lightbox-img" src="" alt=""/>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<div class="shell">
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon"></div>
+      <span class="logo-text">LitterWatch</span>
+    </div>
+    <div class="header-right">
+      <span id="clock">--:--:--</span>
+      <span id="connection-status" class="live-badge">
+        <span class="live-dot"></span>
+        <span id="connection-label">CONNECTING...</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ── Sidebar ── -->
+  <aside>
+    <span class="nav-section">Monitor</span>
+    <div class="nav-item active" onclick="showPage('dashboard', this)">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('stream', this)">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      Live Feed
+    </div>
+
+    <span class="nav-section">Data</span>
+    <div class="nav-item" onclick="showPage('incidents', this)">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Incidents
+    </div>
+    <div class="nav-item" onclick="showPage('vehicles', this)">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+      Vehicles
+    </div>
+
+    <div class="sidebar-stats" id="sidebar-stats">
+      <div class="sidebar-stat"><span>Total Events</span><span id="sb-total">—</span></div>
+      <div class="sidebar-stat"><span>Persons</span><span id="sb-persons">—</span></div>
+      <div class="sidebar-stat"><span>Vehicles</span><span id="sb-vehicles">—</span></div>
+      <div class="sidebar-stat"><span>Camera</span><span id="sb-camera">CAM_01</span></div>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main>
+
+    <!-- DASHBOARD PAGE -->
+    <div class="page active" id="page-dashboard">
+
+      <div class="cards-row">
+        <div class="card warn">
+          <div class="card-label">Total Incidents</div>
+          <div class="card-value" id="stat-total">—</div>
+          <div class="card-sub">all time</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Person Offenders</div>
+          <div class="card-value" id="stat-persons">—</div>
+          <div class="card-sub">pedestrians</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Vehicle Offenders</div>
+          <div class="card-value" id="stat-vehicles">—</div>
+          <div class="card-sub">with plate OCR</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Unique Vehicles</div>
+          <div class="card-value" id="stat-unique-v">—</div>
+          <div class="card-sub">in database</div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Recent Incidents</span>
+            <button class="btn" onclick="loadAll()">↻ Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th><th>Time</th><th>Type</th>
+                  <th>Offender</th><th>Plate</th><th>Conf</th><th>Snap</th>
+                </tr>
+              </thead>
+              <tbody id="recent-tbody">
+                <tr><td colspan="7" class="empty-cell">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="right-col">
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">Trash Types</span>
+            </div>
+            <div class="bar-list" id="trash-bars">
+              <div class="no-data">No data</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">Zone Heatmap</span>
+            </div>
+            <div class="zone-grid" id="zone-grid"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE FEED PAGE -->
+    <div class="page" id="page-stream">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Live Camera Feeds</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="addCameraPrompt()">+ Add Camera</button>
+            <button class="btn" onclick="refreshStreams()">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Camera grid — dynamically populated -->
+        <div class="camera-grid" id="camera-grid">
+          <!-- filled by JS from CAMERAS config -->
+        </div>
+
+        <div class="stream-help">
+          Stream endpoint format:
+          <span class="code">http://&lt;host&gt;:8000/stream/&lt;camera_id&gt;</span>
+          — requires detect.py running per camera
+        </div>
+      </div>
+    </div>
+
+    <!-- INCIDENTS PAGE -->
+    <div class="page" id="page-incidents">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">All Incidents</span>
+          <button class="btn" onclick="loadIncidents()">↻ Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Timestamp</th><th>Camera</th><th>Trash Type</th>
+                <th>Conf</th><th>Offender</th><th>Plate</th><th>Alert</th><th>Snapshot</th>
+              </tr>
+            </thead>
+            <tbody id="all-tbody">
+              <tr><td colspan="9" class="empty-cell">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VEHICLES PAGE -->
+    <div class="page" id="page-vehicles">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Repeat Vehicle Offenders</span>
+          <button class="btn" onclick="loadVehicles()">↻ Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>License Plate</th><th>First Seen</th>
+                <th>Last Seen</th><th>Incidents</th>
+              </tr>
+            </thead>
+            <tbody id="vehicles-tbody">
+              <tr><td colspan="4" class="empty-cell">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

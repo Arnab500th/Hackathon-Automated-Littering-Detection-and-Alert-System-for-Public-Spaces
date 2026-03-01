@@ -1,6 +1,7 @@
 import cv2
 import time
 import os
+import requests
 from datetime import datetime
 from ultralytics import YOLO
 import uuid
@@ -67,6 +68,20 @@ ZONE_NAMES = {
     (0, 0): "Top-Left",    (0, 1): "Top-Center",    (0, 2): "Top-Right",
     (1, 0): "Bot-Left",    (1, 1): "Bot-Center",     (1, 2): "Bot-Right",
 }
+
+# ── Communication helpers ──────────────────────────────────────
+
+def push_frame_to_backend(frame, camera_id):
+    try:
+        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        requests.post(
+            f"http://localhost:8000/frame/{camera_id}",
+            data=jpeg.tobytes(),
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=0.1   # don't block video loop
+        )
+    except:
+        pass   # silently skip if backend busy
 
 
 # ── Helper functions ──────────────────────────────────────────
