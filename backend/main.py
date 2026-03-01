@@ -1,101 +1,122 @@
-from fastapi import FastAPI,Request,Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from model import litterSchema, VehicleSchema
-from database import session,engine
+from fastapi.staticfiles import StaticFiles
+from model import LitterSchema, VehicleSchema
+from database import session, engine
 import DBMS
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+import os
 
-app=FastAPI()
+app = FastAPI(title="LitterWatch API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5500"],
+    allow_origins=["*"],        # open for now, restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Serve snapshot images statically
+# Frontend can access: http://localhost:8000/snapshots/persons/img.jpg
+os.makedirs("data/snapshots", exist_ok=True)
+app.mount("/snapshots", StaticFiles(directory="data/snapshots"), name="snapshots")
+
+# Create tables on startup
 DBMS.Base.metadata.create_all(bind=engine)
 
-# THIS IS THE HOME PAGE
-@app.get("/")
-def home():
-    return "hello world"
-
 def get_db():
-    db=session()
+    db = session()
     try:
         yield db
     finally:
         db.close()
 
-#THIS IS A EXAMPLE TABLE I MADE TO INITIATE THE TABLE ---CAN BE REMOVED---
-# litterrate=detections = [
-#     litterSchema(
-#                  timestamp=2026,
-#         camera_id="CAM_NORTH_01",
-#         trash_type="Plastic Bottle",
-#         trash_confidence=0.98,
-#         offender_type="Vehicle",
-#         license_plate="ABC-1234",
-#         person_image_path="/storage/p1.jpg",
-#         vehicle_image_path="/storage/v1.jpg",
-#         full_frame_path="/storage/f1.jpg",
-#         alert_sent=False
-#     ),
-#     litterSchema(
-#                  timestamp=2027,
-#         camera_id="CAM_SOUTH_02",
-#         trash_type="Cardboard",
-#         trash_confidence=0.85,
-#         offender_type="Pedestrian",
-#         license_plate="",
-#         person_image_path="/storage/p2.jpg",
-#          vehicle_image_path="",
-#         full_frame_path="/storage/f2.jpg",
-#         alert_sent=True
-#     )
-# ]
+# ── Health check ──────────────────────────────────────────────
+@app.get("/")
+def home():
+    return {"status": "LitterWatch API running"}
 
-# #THIS IS TO INITIATE THE DATABASE
-# def initi():
-#     db= session()
-#     count= db.query(DBMS.litterr).count
-#     if count == 0:
-#         for litter in litterrate:
-#             db.add(DBMS.litterr(**litter.model_dump()))
-#         db.commit()
-
-# initi()
-
-# THIS IS THE MAIN PAGE WHERE EVERYTHING STARTS
+# ── Get all incidents ─────────────────────────────────────────
 @app.get("/incidents")
-def litter(db: Session = Depends(get_db)):
-    db_incidents= db.query(DBMS.litterr).all()
-    return db_incidents
+def get_incidents(db: Session = Depends(get_db)):
+    return db.query(DBMS.LitterIncident).order_by(
+        DBMS.LitterIncident.timestamp.desc()
+    ).all()
 
-#this is for vehicle table showing
-@app.get("/vehicles")
-def litter(db: Session = Depends(get_db)):
-    db_vehicle=db.query(DBMS.litterr).filter(DBMS.litterr.offender_type=="vehicle").all() #--set the input in lowercase or it wont work--
-    if db_vehicle:
-        db_incidents= db.query(DBMS.vehicle).all()
-        return db_incidents
+# ── Get recent incidents (for live dashboard feed) ────────────
+@app.get("/incidents/recent")
+def get_recent(limit: int = 10, db: Session = Depends(get_db)):
+    return db.query(DBMS.LitterIncident).order_by(
+        DBMS.LitterIncident.timestamp.desc()
+    ).limit(limit).all()
 
-#this is the input taking page for both 
+# ── Post new incident (called by detect.py via api_client) ────
 @app.post("/incidents")
-def litteration(Litter: litterSchema, vehicle:VehicleSchema, db: Session=Depends(get_db)):
-    main=DBMS.litterr(**Litter.model_dump())
-    #--set the input in lowercase or it wont work--
-    if Litter.offender_type.lower() == "vehicle":
-        new_entry = DBMS.vehicle(**vehicle.model_dump())
-        db.add(main)
-        db.add(new_entry)
-        db.commit()
-        return vehicle
-    else:
-        db.add(DBMS.litterr(**Litter.model_dump()))
-        db.commit()
-        return Litter
+def post_incident(litter: LitterSchema, db: Session = Depends(get_db)):
+    # Always create incident record
+    new_incident = DBMS.LitterIncident(**litter.model_dump())
+    db.add(new_incident)
 
+    # If vehicle offender, update vehicle table
+    if litter.offender_type.lower() == "vehicle" and litter.license_plate:
+        existing = db.query(DBMS.Vehicle).filter(
+            DBMS.Vehicle.license_plate == litter.license_plate
+        ).first()
 
+        if existing:
+            # Vehicle seen before → increment count
+            existing.last_seen      = litter.timestamp
+            existing.incident_count += 1
+        else:
+            # New vehicle
+            new_vehicle = DBMS.Vehicle(
+                license_plate  = litter.license_plate,
+                first_seen     = litter.timestamp,
+                last_seen      = litter.timestamp,
+                incident_count = 1
+            )
+            db.add(new_vehicle)
+
+    db.commit()
+    db.refresh(new_incident)
+    return new_incident
+
+# ── Get all vehicles ──────────────────────────────────────────
+@app.get("/vehicles")
+def get_vehicles(db: Session = Depends(get_db)):
+    return db.query(DBMS.Vehicle).order_by(
+        DBMS.Vehicle.incident_count.desc()
+    ).all()
+
+# ── Stats for dashboard cards ─────────────────────────────────
+@app.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    total      = db.query(DBMS.LitterIncident).count()
+    vehicles   = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.offender_type == "vehicle"
+    ).count()
+    persons    = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.offender_type == "person"
+    ).count()
+
+    # Trash type breakdown
+    by_type = db.query(
+        DBMS.LitterIncident.trash_type,
+        func.count(DBMS.LitterIncident.id)
+    ).group_by(DBMS.LitterIncident.trash_type).all()
+
+    # Camera breakdown
+    by_camera = db.query(
+        DBMS.LitterIncident.camera_id,
+        func.count(DBMS.LitterIncident.id)
+    ).group_by(DBMS.LitterIncident.camera_id).all()
+
+    return {
+        "total_incidents": total,
+        "vehicle_offenders": vehicles,
+        "person_offenders": persons,
+        "by_trash_type": {t: c for t, c in by_type},
+        "by_camera": {cam: c for cam, c in by_camera}
+    }
