@@ -6,22 +6,8 @@ from ultralytics import YOLO
 import uuid
 from config import *
 
-# ── Placeholder helpers ───────────────────────────────────────
-# These stubs exist to satisfy references in the main logic.
-# They can be replaced with real implementations later.
-
-def read_plate_from_frame(frame, box):
-    """Return license plate string if OCR succeeds (stub)."""
-    # TODO: implement actual plate recognition
-    return None
-
-
-def post_incident(event):
-    """Notify backend or log incident (stub)."""
-    # In production this would send the event to a server or database
-    print("[POST INCIDENT]", event)
-
-
+from ocr_module import read_license_plate_from_frame as read_plate_from_frame
+from api_client import post_incident
 
 # ── Models ────────────────────────────────────────────────────
 person_model = YOLO(r"ml_pipeline\weights\yolov8s.pt")

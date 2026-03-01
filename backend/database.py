@@ -1,8 +1,10 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+import os
 
-DATATBASE_URL="sqlite:///./main.db"
-connect_args = {"check_same_thread": False}
-engine=create_engine(DATATBASE_URL,connect_args=connect_args)
+# Always creates main.db in the backend/ folder
+BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
+DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'main.db')}"
 
-session= sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine  = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
