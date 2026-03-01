@@ -24,7 +24,8 @@ def post_incident(event:dict)-> bool:
 
         if response.status_code == 200:
             data = response.json()
-            print("Incident posted successfully., Response:", data)
+            print(f"[API] ✓ Incident posted (id: {data.get('id', '?')})")
+            return True
         else:
             print(f"Failed to post incident. Status code: {response.status_code}, Response: {response.text}")
             return False
