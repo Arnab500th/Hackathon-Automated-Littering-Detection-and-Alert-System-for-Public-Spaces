@@ -67,36 +67,3 @@ def get_recent_incidents(limit: int = 10) -> list:
         pass
     return []
 
-
-if __name__ == "__main__":
-    print("Testing api_client.py...")
-    print("Make sure backend is running: uvicorn main:app --reload")
-    print()
-
-    test_event = {
-        "timestamp":       datetime.now().isoformat(),
-        "camera_id":       "CAM_TEST",
-        "label":           "Bottle",
-        "confidence":      0.82,
-        "suspect_type":    "person",
-        "image_path":      None,
-        "full_frame_path": None,
-        "license_plate":   None,
-    }
-
-    print("Sending test incident...")
-    success = post_incident(test_event)
-
-    if success:
-        print("\nChecking stats...")
-        stats = get_stats()
-        print(f"Stats: {stats}")
-
-        print("\nChecking recent incidents...")
-        recent = get_recent_incidents(5)
-        print(f"Recent count: {len(recent)}")
-        if recent:
-            print(f"Latest: {recent[0]}")
-    else:
-        print("Backend not reachable.")
-        print("Start backend: cd backend && uvicorn main:app --reload")

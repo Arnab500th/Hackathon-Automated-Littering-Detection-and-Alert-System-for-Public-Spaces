@@ -1,33 +1,50 @@
+# ===============================
 # Python
+# ===============================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.log
-*.sqlite3
 
 # Virtual environments
 venv/
-.env/
+.venv/
 
-# IDE
-.vscode/
-.idea/
+# Environment files
+.env
+.env.*
 
-# OS junk
+# ===============================
+# ML / AI
+# ===============================
+*.pt
+*.onnx
+*.engine
+*.tflite
+
+# ===============================
+# Databases
+# ===============================
+*.db
+*.sqlite
+*.sqlite3
+
+# ===============================
+# Test + Debug
+# ===============================
+test/
+test_results.txt
+tmp_*.py
+
+# ===============================
+# System
+# ===============================
 .DS_Store
 Thumbs.db
 
-# Dataset & outputs
-data/taco_yolo/
-training/runs/
-data/snapshots/
-*.mp4
-*.avi
-
-# Model weights (DO NOT COMMIT)
-ml_pipeline/weights/*.pt
-
-# Secrets
-.env
-config_local.py
+# ===============================
+# IDE
+# ===============================
+.vscode/
+.idea/

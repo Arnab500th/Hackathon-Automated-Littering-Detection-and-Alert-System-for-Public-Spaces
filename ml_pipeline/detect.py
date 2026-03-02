@@ -1,7 +1,10 @@
 import cv2
 import time
 import os
+import sys
+import queue
 import threading
+import argparse
 import requests
 from datetime import datetime
 from ultralytics import YOLO
@@ -15,9 +18,7 @@ try:
 except ImportError:
     print("[WARN] ocr_module not found - OCR disabled")
     OCR_AVAILABLE = False
-
-    def read_plate_from_frame(frame, box): 
-        
+    def read_plate_from_frame(frame, box):
         return None
 
 try:
@@ -27,183 +28,167 @@ except ImportError:
     print("[WARN] api_client not found - backend posting disabled")
     API_AVAILABLE = False
     def post_incident(event):
-        
         print("[POST INCIDENT]", event)
 
 
-# ── Backend communication ─────────────────────────────────────
-#
-# Stream architecture:
-#   Main loop  →  writes latest frame to _stream_frame (no blocking)
-#   Sender thread  →  reads _stream_frame, encodes, POSTs at its own pace
-#
-# This means:
-#   - Main loop NEVER waits for HTTP or JPEG encode
-#   - Stream runs as fast as the network allows
-#   - If backend is slow, sender skips frames automatically (always sends latest)
+# ── Camera selection ──────────────────────────────────────────
+# Run one camera:   python detect.py --cam 0
+# Run all cameras:  python detect.py
+parser = argparse.ArgumentParser(description="TRACE detection pipeline")
+parser.add_argument(
+    "--cam", type=int, default=None,
+    help="Index into CAMERA_CONFIG to run (default: run all)",
+)
+args = parser.parse_args()
 
-_stream_frame      = None          # latest annotated frame (numpy array)
-_stream_frame_lock = threading.Lock()
-_stream_running    = True
+if args.cam is not None:
+    if args.cam >= len(CAMERA_CONFIG):
+        print(f"[ERROR] --cam {args.cam} out of range. "
+              f"Config has {len(CAMERA_CONFIG)} cameras (0-{len(CAMERA_CONFIG)-1}).")
+        sys.exit(1)
+    _ACTIVE_CAMERAS = [CAMERA_CONFIG[args.cam]]
+else:
+    _ACTIVE_CAMERAS = CAMERA_CONFIG
 
 
-def _stream_sender_thread(camera_id):
+# ── Stream sender (one per camera, fully independent) ─────────
+class StreamSender:
     """
-    Dedicated daemon thread: continuously encodes and POSTs
-    the latest frame to the backend stream endpoint.
-    Runs independently of the main loop at its own pace.
+    Dedicated daemon thread per camera.
+    push_frame() just swaps a pointer — zero blocking in detection loop.
+    Sender thread encodes + POSTs at its own pace, always sends latest frame.
     """
-    last_sent = None
-    while _stream_running:
-        with _stream_frame_lock:
-            frame = _stream_frame
+    def __init__(self, camera_id: str):
+        self.camera_id = camera_id
+        self._frame    = None
+        self._lock     = threading.Lock()
+        self._running  = True
+        self._thread   = threading.Thread(
+            target=self._run, daemon=True,
+            name=f"StreamSender-{camera_id}"
+        )
+        self._thread.start()
 
-        # No frame yet or same frame as last send — wait a bit
-        if frame is None or frame is last_sent:
-            time.sleep(0.01)
-            continue
+    def _run(self):
+        last_sent = None
+        while self._running:
+            with self._lock:
+                frame = self._frame
+            if frame is None or frame is last_sent:
+                time.sleep(0.01)  # ~30fps max
+                continue
+            last_sent = frame
+            try:
+                _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 40])
+                requests.post(
+                    f"{BACKEND_URL}/frame/{self.camera_id}",
+                    data=jpeg.tobytes(),
+                    headers={"Content-Type": "application/octet-stream"},
+                    timeout=1.0,
+                )
+            except Exception:
+                pass  # never crash detection due to stream issues
+            time.sleep(0.033)  # enforce ~30fps ceiling
 
-        last_sent = frame
-        try:
-            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 20])
-            requests.post(
-                f"{BACKEND_URL}/frame/{camera_id}",
-                data=jpeg.tobytes(),
-                headers={"Content-Type": "application/octet-stream"},
-                timeout=1.0
-            )
-        except Exception:
-            pass
+    def push_frame(self, frame):
+        with self._lock:
+            self._frame = frame
 
-
-def push_frame_to_backend(frame, camera_id):
-    """
-    Main loop calls this. Just writes frame reference to shared buffer.
-    Returns instantly — no encoding, no HTTP, no thread spawn.
-    The sender thread handles the rest.
-    """
-    global _stream_frame
-    with _stream_frame_lock:
-        _stream_frame = frame   # sender thread picks this up
+    def stop(self):
+        self._running = False
 
 
 def post_trash_log(trash_counts, camera_id):
-    """
-    Sends ONE batched summary every BATCH_INTERVAL seconds.
-    { timestamp, camera_id, counts: {label: peak_count} }
-    """
     if not trash_counts:
         return
     def _send():
         try:
             requests.post(
                 f"{BACKEND_URL}/trash_log",
-                json={
-                    "timestamp": datetime.now().isoformat(),
-                    "camera_id": camera_id,
-                    "counts":    trash_counts
-                },
-                timeout=2.0
+                json={"timestamp": datetime.now().isoformat(),
+                      "camera_id": camera_id,
+                      "counts":    trash_counts},
+                timeout=2.0,
             )
         except Exception:
             pass
     threading.Thread(target=_send, daemon=True).start()
 
 
-
-# ── Models ────────────────────────────────────────────────────
-person_model = YOLO(r"ml_pipeline\weights\yolov8s.pt")
-trash_model  = YOLO(r"ml_pipeline\weights\taco_8s_v3.pt")
-
-# ── Start stream sender thread ────────────────────────────────
-# One persistent thread handles all frame POSTing independently
-_sender = threading.Thread(target=_stream_sender_thread,
-    args=(CAMERA_ID,),
-    daemon=True,
-    name="StreamSender"
-)
-_sender.start()
-
 # ── Folder setup ──────────────────────────────────────────────
 os.makedirs(f"{SNAPSHOT_DIR}/persons",  exist_ok=True)
 os.makedirs(f"{SNAPSHOT_DIR}/vehicles", exist_ok=True)
 os.makedirs(f"{SNAPSHOT_DIR}/full",     exist_ok=True)
 
-# ── State variables ───────────────────────────────────────────
-tracked_trash    = {}
-object_states    = {}
-smoothed_boxes   = {}
-smoothed_persons = {}
 
-last_drawn_persons  = []
-last_drawn_vehicles = []
-last_drawn_trash    = []
+# ── Per-camera state container ────────────────────────────────
+class CameraContext:
+    def __init__(self, camera_id: str):
+        self.camera_id            = camera_id
+        self.tracked_trash        = {}
+        self.object_states        = {}
+        self.smoothed_boxes       = {}
+        self.smoothed_persons     = {}
+        self.last_drawn_persons   = []
+        self.last_drawn_vehicles  = []
+        self.last_drawn_trash     = []
+        self.last_known_persons   = []
+        self.last_known_vehicles  = []
+        self.current_trash_counts = {}
+        self.current_zone_counts  = {}
+        # Per‑batch aggregated counts for new, unique trash objects
+        self.max_trash_in_batch   = {}
+        # Track IDs we have already logged to the backend (avoid double-counting)
+        self.seen_trash_ids       = set()
+        # Per-frame map of "new this frame" trash counts, used to build batches
+        self.latest_new_trash_counts = {}
+        self.last_batch_time      = time.time()
+        self.frame_count          = 0
+        self.prev_time            = 0.0
 
-last_known_persons  = []
-last_known_vehicles = []
-
-# ── Scene analytics ───────────────────────────────────────────
-current_trash_counts = {}
-current_zone_counts  = {}
-
-# ── Batch tracking ────────────────────────────────────────────
-max_trash_in_batch = {}
-last_batch_time    = time.time()
-
-# ── Frame counters ────────────────────────────────────────────
-frame_count = 0
-prev_time   = 0
-frame_w     = 0
-frame_h     = 0
 
 # ── Zone config ───────────────────────────────────────────────
 ZONE_COLS  = 3
 ZONE_ROWS  = 2
 ZONE_NAMES = {
-    (0, 0): "Top-Left",   (0, 1): "Top-Center",   (0, 2): "Top-Right",
-    (1, 0): "Bot-Left",   (1, 1): "Bot-Center",    (1, 2): "Bot-Right",
+    (0, 0): "Top-Left",  (0, 1): "Top-Center",  (0, 2): "Top-Right",
+    (1, 0): "Bot-Left",  (1, 1): "Bot-Center",   (1, 2): "Bot-Right",
 }
 
 
 # ── Helper functions ──────────────────────────────────────────
-#if ByteTrack fails then grid key will be used
 def get_grid_key(box):
     cx = (box[0] + box[2]) // 2
     cy = (box[1] + box[3]) // 2
     return (int(cx) // 50, int(cy) // 50)
 
-#divides the frame into 3*2 grid 
-#TODO : might remove this later feels useless
-def get_zone(box):
-    if frame_w == 0 or frame_h == 0:
+
+def get_zone(frame, box):
+    h, w = frame.shape[:2]
+    if w == 0 or h == 0:
         return "Unknown"
     cx  = (box[0] + box[2]) / 2
     cy  = (box[1] + box[3]) / 2
-    col = min(int((cx / frame_w) * ZONE_COLS), ZONE_COLS - 1)
-    row = min(int((cy / frame_h) * ZONE_ROWS), ZONE_ROWS - 1)
+    col = min(int((cx / w) * ZONE_COLS), ZONE_COLS - 1)
+    row = min(int((cy / h) * ZONE_ROWS), ZONE_ROWS - 1)
     return ZONE_NAMES.get((row, col), f"Z{row}{col}")
 
-#find the euclidian distance between two boxes
+
 def get_distance(box_a, box_b):
-    ax = (box_a[0] + box_a[2]) / 2
-    ay = (box_a[1] + box_a[3]) / 2
-    bx = (box_b[0] + box_b[2]) / 2
-    by = (box_b[1] + box_b[3]) / 2
+    ax = (box_a[0] + box_a[2]) / 2;  ay = (box_a[1] + box_a[3]) / 2
+    bx = (box_b[0] + box_b[2]) / 2;  by = (box_b[1] + box_b[3]) / 2
     return ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
 
 
 def boxes_overlap(box_a, box_b):
     return not (
-        box_a[2] < box_b[0] or
-        box_a[0] > box_b[2] or
-        box_a[3] < box_b[1] or
-        box_a[1] > box_b[3]
+        box_a[2] < box_b[0] or box_a[0] > box_b[2] or
+        box_a[3] < box_b[1] or box_a[1] > box_b[3]
     )
 
 
 def nearest_suspect(trash_box, persons, vehicles):
-    suspects = [("person", b) for b in persons] + \
-               [("vehicle", b) for b in vehicles]
+    suspects = [("person", b) for b in persons] + [("vehicle", b) for b in vehicles]
     if not suspects:
         return None, None
     nearest = min(suspects, key=lambda s: get_distance(trash_box, s[1]))
@@ -215,8 +200,7 @@ def get_box_center(box):
 
 
 def box_movement(box_a, box_b):
-    ax, ay = get_box_center(box_a)
-    bx, by = get_box_center(box_b)
+    ax, ay = get_box_center(box_a);  bx, by = get_box_center(box_b)
     return ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
 
 
@@ -242,13 +226,10 @@ def save_snapshot(frame, suspect_box, suspect_type, trash_label):
     uid       = uuid.uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     h, w      = frame.shape[:2]
-    x1 = max(0, int(suspect_box[0]))
-    y1 = max(0, int(suspect_box[1]))
-    x2 = min(w, int(suspect_box[2]))
-    y2 = min(h, int(suspect_box[3]))
+    x1 = max(0, int(suspect_box[0]));  y1 = max(0, int(suspect_box[1]))
+    x2 = min(w, int(suspect_box[2]));  y2 = min(h, int(suspect_box[3]))
     crop = frame[y1:y2, x1:x2]
     if crop.size == 0:
-        print("[SNAPSHOT] Failed - invalid coordinates")
         return None, None
     folder    = "persons" if suspect_type == "person" else "vehicles"
     img_path  = f"{SNAPSHOT_DIR}/{folder}/{trash_label}_{timestamp}_{uid}.jpg"
@@ -264,28 +245,24 @@ def draw_rect(frame, box, label, color):
     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
     (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
     cv2.rectangle(frame, (x1, y1 - th - 8), (x1 + tw, y1), color, -1)
-    cv2.putText(frame, label, (x1, y1 - 4),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    cv2.putText(frame, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
 
-def draw_zone_grid(frame):
+def draw_zone_grid(ctx, frame):
     h, w  = frame.shape[:2]
-    col_w = w // ZONE_COLS
-    row_h = h // ZONE_ROWS
+    col_w = w // ZONE_COLS;  row_h = h // ZONE_ROWS
     for c in range(1, ZONE_COLS):
         cv2.line(frame, (c * col_w, 0), (c * col_w, h), (50, 50, 50), 1)
     for r in range(1, ZONE_ROWS):
         cv2.line(frame, (0, r * row_h), (w, r * row_h), (50, 50, 50), 1)
     for (row, col), name in ZONE_NAMES.items():
-        tx    = col * col_w + 5
-        ty    = row * row_h + 18
-        count = current_zone_counts.get(name, 0)
+        tx    = col * col_w + 5;  ty = row * row_h + 18
+        count = ctx.current_zone_counts.get(name, 0)
         color = (0, 0, 200) if count > 2 else (80, 80, 80)
-        cv2.putText(frame, f"{name}:{count}",
-                    (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        cv2.putText(frame, f"{name}:{count}", (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
 
 
-# ── State machine colors ──────────────────────────────────────
 STATE_COLORS = {
     "UNKNOWN":    (128, 128, 128),
     "CARRYING":   (0,   255, 255),
@@ -297,26 +274,19 @@ STATE_COLORS = {
 
 
 # ── State machine ─────────────────────────────────────────────
-def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
-    global object_states, frame_count
-
-    if key not in object_states:
-        object_states[key] = {
-            "state":          "UNKNOWN",
-            "box":            current_box,
-            "owner_box":      None,
-            "owner_last_pos": None,
-            "sep_frame":      None,
-            "prev_box":       prev_box,
-            "label":          None,
-            "confidence":     0.0,
-            "first_seen":     frame_count,
+def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, frame):
+    if key not in ctx.object_states:
+        ctx.object_states[key] = {
+            "state": "UNKNOWN", "box": current_box,
+            "owner_box": None, "owner_last_pos": None,
+            "sep_frame": None, "prev_box": prev_box,
+            "label": None, "confidence": 0.0,
+            "first_seen": ctx.frame_count,
         }
 
-    state_info = object_states[key]
+    state_info = ctx.object_states[key]
     state      = state_info["state"]
 
-    # ── UNKNOWN ───────────────────────────────────────────────
     if state == "UNKNOWN":
         suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None:
@@ -325,25 +295,22 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
                 state_info["state"]     = "CARRYING"
                 state_info["owner_box"] = suspect_box
 
-    # ── CARRYING ──────────────────────────────────────────────
     elif state == "CARRYING":
         suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None:
             state_info["owner_box"]      = suspect_box
             state_info["owner_last_pos"] = get_box_center(suspect_box)
-        if suspect_box is None or \
-           get_distance(current_box, suspect_box) > CARRY_DISTANCE:
+        if suspect_box is None or get_distance(current_box, suspect_box) > CARRY_DISTANCE:
             state_info["state"]          = "SEPARATION"
-            state_info["sep_frame"]      = frame_count
-            state_info["owner_last_pos"] = get_box_center(
-                state_info["owner_box"]
-            ) if state_info["owner_box"] else None
+            state_info["sep_frame"]      = ctx.frame_count
+            state_info["owner_last_pos"] = (
+                get_box_center(state_info["owner_box"])
+                if state_info["owner_box"] else None
+            )
 
-    # ── SEPARATION ────────────────────────────────────────────
     elif state == "SEPARATION":
         suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None and get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
-            
             if is_same_person(suspect_box, state_info.get("owner_last_pos")):
                 state_info["state"] = "CANCELLED"
                 print("[CANCEL] Owner returned during separation")
@@ -352,17 +319,15 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
                 print("[INFO] Passerby near object during separation - ignoring")
 
         movement         = box_movement(current_box, prev_box)
-        sep_frame        = state_info["sep_frame"] or frame_count
-        frames_separated = frame_count - sep_frame
+        sep_frame        = state_info["sep_frame"] or ctx.frame_count
+        frames_separated = ctx.frame_count - sep_frame
         if movement < STATIONARY_PIXELS and frames_separated >= SEPARATION_FRAMES:
             state_info["state"] = "STATIONARY"
             print(f"[STATE] Object STATIONARY after {frames_separated} frames")
 
-    # ── STATIONARY ────────────────────────────────────────────
     elif state == "STATIONARY":
         suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
-        if suspect_box is not None and \
-           get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
+        if suspect_box is not None and get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
             if is_same_person(suspect_box, state_info.get("owner_last_pos")):
                 state_info["state"] = "CANCELLED"
                 print("[CANCEL] Owner returned to object")
@@ -374,14 +339,13 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
             suspect_box is None or
             get_distance(current_box, suspect_box) > ABANDON_DISTANCE
         )
-
         if person_gone:
-            frames_on_ground  = frame_count - state_info.get("sep_frame", frame_count)
+            frames_on_ground  = ctx.frame_count - state_info.get("sep_frame", ctx.frame_count)
             seconds_on_ground = round(frames_on_ground / 30, 1)
-            zone              = get_zone(current_box)
+            zone              = get_zone(frame, current_box)
 
             print(f"\n{'='*45}")
-            print(f"  LITTER EVENT CONFIRMED")
+            print(f"  LITTER EVENT CONFIRMED  [{ctx.camera_id}]")
             print(f"  Label:     {state_info.get('label', 'Unknown')}")
             print(f"  Zone:      {zone}")
             print(f"  On ground: {seconds_on_ground}s")
@@ -390,14 +354,11 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
 
             snap_box  = state_info.get("owner_box") or suspect_box
             snap_type = suspect_type or "person"
-            img_path  = None
-            full_path = None
-            plate     = None
+            img_path = full_path = plate = None
 
             if snap_box is not None:
                 img_path, full_path = save_snapshot(
-                    frame, snap_box, snap_type,
-                    state_info.get("label", "trash")
+                    frame, snap_box, snap_type, state_info.get("label", "trash")
                 )
                 if snap_type == "vehicle" and OCR_AVAILABLE:
                     plate = read_plate_from_frame(frame, snap_box)
@@ -411,7 +372,7 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
                 "suspect_type":    snap_type,
                 "image_path":      img_path,
                 "full_frame_path": full_path,
-                "camera_id":       CAMERA_ID,
+                "camera_id":       ctx.camera_id,
                 "license_plate":   plate,
                 "confidence":      state_info.get("confidence", 0.0),
                 "zone":            zone,
@@ -423,142 +384,113 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
     return None
 
 
-# ── Litter detection caller ───────────────────────────────────
-def detect_litter(trash_boxes, trash_labels, trash_ids, persons, vehicles, frame):
-    global tracked_trash, frame_count
+def detect_litter(ctx, trash_boxes, trash_labels, trash_ids, persons, vehicles, frame):
     events = []
-
     for i, trash_box in enumerate(trash_boxes):
         label    = trash_labels[i]
         track_id = trash_ids[i]
         key      = track_id if track_id is not None else get_grid_key(trash_box)
 
-        prev_box = trash_box
-        if key in object_states and object_states[key].get("box"):
-            prev_box = object_states[key]["box"]
+        prev_box = ctx.object_states[key]["box"] if key in ctx.object_states else trash_box
+        if key in ctx.object_states:
+            ctx.object_states[key]["label"] = label
 
-        if key in object_states:
-            object_states[key]["label"] = label
+        event = update_object_state(ctx, key, trash_box, prev_box, persons, vehicles, frame)
 
-        event = update_object_state(key, trash_box, prev_box, persons, vehicles, frame)
-
-        if key in object_states:
-            object_states[key]["label"] = label
-
+        if key in ctx.object_states:
+            ctx.object_states[key]["label"] = label
         if event is not None:
             events.append(event)
+        ctx.tracked_trash[key] = ctx.frame_count
 
-        tracked_trash[key] = frame_count
-
-    keys_to_remove = [
-        k for k, v in tracked_trash.items()
-        if frame_count - v > MEMORY_FRAME_COUNT * 3
-    ]
-    for k in keys_to_remove:
-        tracked_trash.pop(k, None)
-        object_states.pop(k, None)
-
+    for k in [k for k, v in ctx.tracked_trash.items()
+              if ctx.frame_count - v > MEMORY_FRAME_COUNT * 3]:
+        ctx.tracked_trash.pop(k, None)
+        ctx.object_states.pop(k, None)
     return events
 
 
-# ── Trash detection + scene analytics ────────────────────────
-def run_trash_detection(frame, persons, vehicles):
-    global last_drawn_trash, current_trash_counts, current_zone_counts
+def run_trash_detection(ctx, frame, persons, vehicles, trash_model):
+    trash_detection = trash_model.track(
+        frame, persist=True, tracker="bytetrack.yaml", verbose=False
+    )[0]
 
-    trash_detection = trash_model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
-
-    trash_boxes       = []
-    trash_labels      = []
-    trash_ids         = []
-    last_drawn_trash  = []
-    trash_type_counts = {}
-    zone_counts       = {}
+    trash_boxes = [];  trash_labels = [];  trash_ids = []
+    ctx.last_drawn_trash  = []
+    trash_type_counts = {};  zone_counts = {}
+    # Per-frame: how many *new* unique track IDs we saw per trash label
+    new_trash_counts = {}
 
     for box in trash_detection.boxes:
         conf   = float(box.conf[0])
         coords = box.xyxy[0].tolist()
         label  = trash_model.names[int(box.cls[0])]
-
         if conf < TRASH_CONF:
             continue
 
         trash_type_counts[label] = trash_type_counts.get(label, 0) + 1
-        zone = get_zone(coords)
+        zone = get_zone(frame, coords)
         zone_counts[zone] = zone_counts.get(zone, 0) + 1
 
         track_id = int(box.id[0]) if box.id is not None else None
         key      = track_id if track_id is not None else get_grid_key(coords)
+        trash_boxes.append(coords);  trash_labels.append(label);  trash_ids.append(track_id)
 
-        trash_boxes.append(coords)
-        trash_labels.append(label)
-        trash_ids.append(track_id)
+        # Count only first appearance of each track_id once per camera lifetime
+        if track_id is not None and track_id not in ctx.seen_trash_ids:
+            new_trash_counts[label] = new_trash_counts.get(label, 0) + 1
+            ctx.seen_trash_ids.add(track_id)
 
-        if key in object_states:
-            object_states[key]["confidence"] = conf
+        if key in ctx.object_states:
+            ctx.object_states[key]["confidence"] = conf
 
-        smooth = smooth_coords(smoothed_boxes, key, coords)
-        state = object_states.get(key, {}).get("state", "UNKNOWN")
-        color = STATE_COLORS.get(state, (225, 225, 225))
-        id_str = f"#{track_id}" if track_id else ""
-
+        smooth    = smooth_coords(ctx.smoothed_boxes, key, coords)
+        state     = ctx.object_states.get(key, {}).get("state", "UNKNOWN")
+        color     = STATE_COLORS.get(state, (225, 225, 225))
+        id_str    = f"#{track_id}" if track_id else ""
         dwell_str = ""
         if state == "STATIONARY":
-            sep_f     = object_states.get(key, {}).get("sep_frame", frame_count)
-            secs      = int((frame_count - sep_f) / 30)
-            dwell_str = f"|{secs}s"
+            sep_f     = ctx.object_states.get(key, {}).get("sep_frame", ctx.frame_count)
+            dwell_str = f"|{int((ctx.frame_count - sep_f) / 30)}s"
 
         disp_label = f"{label}{id_str}|{state}{dwell_str}"
         draw_rect(frame, smooth, disp_label, color)
-        last_drawn_trash.append((smooth, disp_label, color))
+        ctx.last_drawn_trash.append((smooth, disp_label, color))
 
-    current_trash_counts = trash_type_counts
-    current_zone_counts  = zone_counts
-
-    events = detect_litter(
-        trash_boxes, trash_labels, trash_ids,
-        persons, vehicles, frame
-    )
-
+    ctx.current_trash_counts     = trash_type_counts
+    ctx.current_zone_counts      = zone_counts
+    ctx.latest_new_trash_counts  = new_trash_counts
+    events = detect_litter(ctx, trash_boxes, trash_labels, trash_ids, persons, vehicles, frame)
     return events, trash_type_counts, zone_counts
 
 
-# ── Draw HUD ──────────────────────────────────────────────────
-def draw_hud(frame, fps, persons, vehicles, events, trash_type_counts, zone_counts):
+def draw_hud(ctx, frame, fps, persons, vehicles, events, trash_type_counts, zone_counts):
     if events:
-        cv2.rectangle(frame, (0, 0),
-                      (frame.shape[1]-1, frame.shape[0]-1),
-                      (0, 0, 255), 10)
+        cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), (0, 0, 255), 10)
         cv2.putText(frame, "LITTER CONFIRMED",
                     (frame.shape[1]//2 - 170, 65),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 3)
 
-    cv2.putText(frame, f"FPS: {fps:.1f}",
-                (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-    cv2.putText(frame, f"Persons: {len(persons)}",
-                (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-    cv2.putText(frame, f"Vehicles: {len(vehicles)}",
-                (10, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 1)
-    cv2.putText(frame, f"Trash: {sum(trash_type_counts.values())}",
-                (10, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+    cv2.putText(frame, f"FPS: {fps:.1f}",            (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+    cv2.putText(frame, f"Persons: {len(persons)}",   (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+    cv2.putText(frame, f"Vehicles: {len(vehicles)}", (10, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 1)
+    cv2.putText(frame, f"Trash: {sum(trash_type_counts.values())}", (10, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
 
     y = 116
     state_counts = {}
-    for s_data in object_states.values():
+    for s_data in ctx.object_states.values():
         s = s_data.get("state", "UNKNOWN")
         state_counts[s] = state_counts.get(s, 0) + 1
     for st, count in state_counts.items():
         color = STATE_COLORS.get(st, (200, 200, 200))
-        cv2.putText(frame, f"  {st}: {count}",
-                    (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        cv2.putText(frame, f"  {st}: {count}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         y += 16
 
     y += 8
-    cv2.putText(frame, "ON SCREEN:",
-                (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+    cv2.putText(frame, "ON SCREEN:", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
     y += 18
     for trash_type, count in sorted(trash_type_counts.items()):
-        cv2.putText(frame, f"  {trash_type}: {count}",
-                    (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+        cv2.putText(frame, f"  {trash_type}: {count}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
         y += 15
 
     if zone_counts:
@@ -569,124 +501,187 @@ def draw_hud(frame, fps, persons, vehicles, events, trash_type_counts, zone_coun
                         (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 100, 255), 1)
 
 
-# ── Main loop ─────────────────────────────────────────────────
-vid = cv2.VideoCapture(SOURCE)
-if not vid.isOpened():
-    print(f"ERROR: Cannot open source: {SOURCE}")
-    exit()
+# ── Per-camera worker thread ──────────────────────────────────
+# Does ALL detection work but ZERO cv2 GUI calls.
+# Puts annotated frames into a queue for the main thread to display.
 
-frame_w = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_h = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
+def camera_worker(cam_config, frame_queues, stop_event):
+    camera_id = cam_config["id"]
+    source    = cam_config["source"]
+    cam_label = cam_config["label"]
 
-print("LitterWatch running... Press Q to quit")
-print(f"Frame:   {frame_w}x{frame_h}")
-print(f"OCR:     {'enabled' if OCR_AVAILABLE else 'disabled'}")
-print(f"Backend: {'enabled' if API_AVAILABLE else 'disabled'}")
+    # Each thread loads its OWN model instances.
+    # Required because ByteTrack persist=True keeps internal state per model object.
+    # Sharing one model between threads would corrupt tracking across cameras.
+    print(f"[{camera_id}] Loading models...")
+    person_model = YOLO(r"ml_pipeline\weights\yolov8s.pt")
+    trash_model  = YOLO(r"ml_pipeline\weights\taco_8s_v3.pt")
+    print(f"[{camera_id}] Models loaded. Starting capture...")
 
-while True:
-    res, frame = vid.read()
-    if not res:
-        print("Stream ended")
-        break
+    ctx           = CameraContext(camera_id)
+    stream_sender = StreamSender(camera_id)
 
-    frame_count += 1
-    curr_time = time.time()
-    fps = 1 / (curr_time - prev_time + 1e-9)
-    prev_time = curr_time
+    vid = cv2.VideoCapture(source)
+    if not vid.isOpened():
+        print(f"[{camera_id}] ERROR: Cannot open source: {source}")
+        # Return, not exit() — exit() would kill the whole process
+        stream_sender.stop()
+        return
 
-    # ── SKIPPED FRAME ─────────────────────────────────────────
-    #NOTE: this never runs lol
-    if frame_count % SKIP_FRAMES != 0:
+    print(f"[TRACE] {camera_id} [{cam_label}] running")
 
-        for coords, label in last_drawn_persons:
-            draw_rect(frame, coords, label, (0, 255, 0))
-        for coords, label in last_drawn_vehicles:
-            draw_rect(frame, coords, label, (0, 165, 255))
+    while not stop_event.is_set():
+        res, frame = vid.read()
+        if not res:
+            print(f"[{camera_id}] Stream ended.")
+            break
 
-        events, trash_counts, zone_counts = run_trash_detection(frame, last_known_persons, last_known_vehicles)
+        ctx.frame_count += 1
+        curr_time = time.time()
+        fps = 1 / (curr_time - ctx.prev_time + 1e-9)
+        ctx.prev_time = curr_time
+
+        # ── Person / vehicle detection ─────────────────────────
+        if ctx.frame_count % SKIP_FRAMES == 0:
+            ctx.last_drawn_persons  = []
+            ctx.last_drawn_vehicles = []
+            persons  = []
+            vehicles = []
+
+            person_detection = person_model(frame, verbose=False)[0]
+            for box in person_detection.boxes:
+                cls    = int(box.cls[0])
+                conf   = float(box.conf[0])
+                coords = box.xyxy[0].tolist()
+                if cls == 0 and conf > PERSON_CONF:
+                    pkey   = get_grid_key(coords)
+                    smooth = smooth_coords(ctx.smoothed_persons, pkey, coords)
+                    label  = f"Person {conf:.2f}"
+                    persons.append(coords)
+                    draw_rect(frame, smooth, label, (0, 255, 0))
+                    ctx.last_drawn_persons.append((smooth, label))
+                elif cls in VEHICLE_CLASSES and conf > PERSON_CONF:
+                    label = f"Vehicle {conf:.2f}"
+                    vehicles.append(coords)
+                    draw_rect(frame, coords, label, (0, 165, 255))
+                    ctx.last_drawn_vehicles.append((coords, label))
+            ctx.last_known_persons  = persons
+            ctx.last_known_vehicles = vehicles
+        else:
+            # Skipped frame: redraw last detections, use cached lists
+            for coords, label in ctx.last_drawn_persons:
+                draw_rect(frame, coords, label, (0, 255, 0))
+            for coords, label in ctx.last_drawn_vehicles:
+                draw_rect(frame, coords, label, (0, 165, 255))
+            persons  = ctx.last_known_persons
+            vehicles = ctx.last_known_vehicles
+
+        # ── Trash detection + state machine ───────────────────
+        events, trash_counts, zone_counts = run_trash_detection(
+            ctx, frame, persons, vehicles, trash_model
+        )
 
         if events:
             for event in events:
-                post_incident(event)
+                threading.Thread(
+                    target=post_incident,
+                    args=(event,),
+                    daemon=True,
+                    name=f"IncidentPost-{camera_id}",
+                ).start()
 
-        draw_zone_grid(frame)
-        draw_hud(frame, fps, last_known_persons, last_known_vehicles,
-                 events, trash_counts, zone_counts)
+        # ── Batch trash log ───────────────────────────────────
+        # Use only *new* unique objects (first time a track_id is seen)
+        for t_type, count in ctx.latest_new_trash_counts.items():
+            ctx.max_trash_in_batch[t_type] = ctx.max_trash_in_batch.get(t_type, 0) + count
+        if curr_time - ctx.last_batch_time >= BATCH_INTERVAL:
+            post_trash_log(ctx.max_trash_in_batch, camera_id)
+            ctx.max_trash_in_batch = {}
+            ctx.last_batch_time    = curr_time
 
-        for t_type, count in trash_counts.items():
-            max_trash_in_batch[t_type] = max(
-                max_trash_in_batch.get(t_type, 0), count
-            )
-        if curr_time - last_batch_time >= BATCH_INTERVAL:
-            post_trash_log(max_trash_in_batch, CAMERA_ID)
-            max_trash_in_batch = {}
-            last_batch_time    = curr_time
+        # ── Overlay ───────────────────────────────────────────
+        draw_zone_grid(ctx, frame)
+        draw_hud(ctx, frame, fps, persons, vehicles, events, trash_counts, zone_counts)
 
-        push_frame_to_backend(frame, CAMERA_ID)
+        # ── Push annotated frame to MJPEG backend stream ──────
+        stream_sender.push_frame(frame)
 
-        cv2.imshow("LitterWatch", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-        continue
+        # ── Put frame in GUI queue (non-blocking, drop if full) ─
+        q = frame_queues.get(camera_id)
+        if q is not None:
+            try:
+                q.put_nowait(frame)
+            except queue.Full:
+                pass  # main thread is slow — drop, never block inference
 
-    # ── DETECTION FRAME ───────────────────────────────────────
-    last_drawn_persons  = []
-    last_drawn_vehicles = []
+    # Cleanup
+    stream_sender.stop()
+    vid.release()
+    print(f"[{camera_id}] Stopped. Total frames: {ctx.frame_count}")
 
-    person_detection = person_model(frame, verbose=False)[0]
-    persons  = []
-    vehicles = []
 
-    for box in person_detection.boxes:
-        cls    = int(box.cls[0])
-        conf   = float(box.conf[0])
-        coords = box.xyxy[0].tolist()
+# ── Main thread: the ONLY place cv2 GUI calls are made ────────
+# OpenCV requires imshow / waitKey / destroyAllWindows to run
+# in the main thread on all platforms, especially Windows.
 
-        if cls == 0 and conf > PERSON_CONF:
-            pkey   = get_grid_key(coords)
-            smooth = smooth_coords(smoothed_persons, pkey, coords)
-            label  = f"Person {conf:.2f}"
-            persons.append(coords)
-            draw_rect(frame, smooth, label, (0, 255, 0))
-            last_drawn_persons.append((smooth, label))
+def main():
+    if not _ACTIVE_CAMERAS:
+        print("[ERROR] No cameras in CAMERA_CONFIG. Edit config.py.")
+        sys.exit(1)
 
-        elif cls in VEHICLE_CLASSES and conf > PERSON_CONF:
-            label = f"Vehicle {conf:.2f}"
-            vehicles.append(coords)
-            draw_rect(frame, coords, label, (0, 165, 255))
-            last_drawn_vehicles.append((coords, label))
+    print(f"[TRACE] Starting {len(_ACTIVE_CAMERAS)} camera(s):")
+    for cam in _ACTIVE_CAMERAS:
+        print(f"  [{cam['id']}]  {cam['label']}  source={cam['source']}")
 
-    last_known_persons = persons
-    last_known_vehicles = vehicles
+    # One small queue per camera — bounded size so memory doesn't grow
+    frame_queues = {cam["id"]: queue.Queue(maxsize=2) for cam in _ACTIVE_CAMERAS}
+    stop_event   = threading.Event()
 
-    events, trash_counts, zone_counts = run_trash_detection(frame, persons, vehicles)
-
-    if events:
-        for event in events:
-            post_incident(event)
-
-    draw_zone_grid(frame)
-    draw_hud(frame, fps, persons, vehicles, events, trash_counts, zone_counts)
-
-    for t_type, count in trash_counts.items():
-        max_trash_in_batch[t_type] = max(
-            max_trash_in_batch.get(t_type, 0), count
+    # Start one worker thread per camera (daemon=False for clean join)
+    threads = []
+    for cam in _ACTIVE_CAMERAS:
+        t = threading.Thread(
+            target=camera_worker,
+            args=(cam, frame_queues, stop_event),
+            daemon=False,
+            name=f"CamWorker-{cam['id']}",
         )
-    if curr_time - last_batch_time >= BATCH_INTERVAL:
-        post_trash_log(max_trash_in_batch, CAMERA_ID)
-        max_trash_in_batch = {}
-        last_batch_time = curr_time
+        t.start()
+        threads.append(t)
 
-    push_frame_to_backend(frame, CAMERA_ID)
+    print("[TRACE] All cameras started. Press Q in any window to quit.\n")
 
-    cv2.imshow("LitterWatch", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    # GUI loop — runs entirely in the main thread
+    while True:
+        for cam in _ACTIVE_CAMERAS:
+            cam_id = cam["id"]
+            try:
+                frame = frame_queues[cam_id].get_nowait()
+                cv2.imshow(f"TRACE - {cam_id} [{cam['label']}]", frame)
+            except queue.Empty:
+                pass  # no new frame for this camera yet
 
-# ── Cleanup ───────────────────────────────────────────────────
-_stream_running = False   # signal sender thread to stop
-vid.release()
-cv2.destroyAllWindows()
-print(f"\nSession ended.")
-print(f"Total frames processed: {frame_count}")
-print(f"Snapshots saved to:     {SNAPSHOT_DIR}/")
+        # Single waitKey per loop tick — handles all windows at once
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            print("[TRACE] Q pressed — stopping...")
+            stop_event.set()
+            break
+
+        # If all worker threads have finished (e.g. all files ended), exit
+        if not any(t.is_alive() for t in threads):
+            print("[TRACE] All streams ended.")
+            break
+
+        time.sleep(0.001)  # avoid burning CPU in the loop
+
+    # Signal stop and wait for clean shutdown
+    stop_event.set()
+    for t in threads:
+        t.join(timeout=8)
+
+    cv2.destroyAllWindows()
+    print("[TRACE] Session ended.")
+
+
+if __name__ == "__main__":
+    main()

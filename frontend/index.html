@@ -6,7 +6,7 @@
 <title>Trash Detection — Surveillance Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css"/>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -25,7 +25,7 @@
   <header>
     <div class="logo">
       <div class="logo-icon"></div>
-      <span class="logo-text">LitterWatch</span>
+      <span class="logo-text">TRACE</span>
     </div>
     <div class="header-right">
       <span id="clock">--:--:--</span>
@@ -66,7 +66,7 @@
       <div class="sidebar-stat"><span>Total Events</span><span id="sb-total">—</span></div>
       <div class="sidebar-stat"><span>Persons</span><span id="sb-persons">—</span></div>
       <div class="sidebar-stat"><span>Vehicles</span><span id="sb-vehicles">—</span></div>
-      <div class="sidebar-stat"><span>Camera</span><span id="sb-camera">CAM_01</span></div>
+      <div class="sidebar-stat"><span>Camera</span><span id="sb-camera">Active Cam's</span></div>
     </div>
   </aside>
 
@@ -78,24 +78,24 @@
 
       <div class="cards-row">
         <div class="card warn">
-          <div class="card-label">Total Incidents</div>
+          <div class="card-label">Incidents Today</div>
           <div class="card-value" id="stat-total">—</div>
-          <div class="card-sub">all time</div>
+          <div class="card-sub" id="stat-total-sub">today</div>
         </div>
         <div class="card">
-          <div class="card-label">Total Trash</div>
+          <div class="card-label">Trash Spotted</div>
           <div class="card-value" id="stat-total-trash">—</div>
-          <div class="card-sub">objects spotted</div>
+          <div class="card-sub" id="stat-trash-sub">today</div>
         </div>
         <div class="card">
           <div class="card-label">Person Offenders</div>
           <div class="card-value" id="stat-persons">—</div>
-          <div class="card-sub">pedestrians</div>
+          <div class="card-sub" id="stat-persons-sub">today</div>
         </div>
         <div class="card">
           <div class="card-label">Vehicle Offenders</div>
           <div class="card-value" id="stat-vehicles">—</div>
-          <div class="card-sub">with plate OCR</div>
+          <div class="card-sub" id="stat-vehicles-sub">today</div>
         </div>
       </div>
 

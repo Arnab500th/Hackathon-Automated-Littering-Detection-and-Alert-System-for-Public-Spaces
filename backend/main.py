@@ -14,6 +14,7 @@ import DBMS
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast, Date
 from datetime import datetime, timedelta
+import asyncio
 import os
 
 # Graceful shutdown flag
@@ -25,7 +26,7 @@ async def lifespan(app):
     # Signal all streaming generators to stop
     shutdown_event.set()
 
-app = FastAPI(title="LitterWatch API", lifespan=lifespan)
+app = FastAPI(title="TRACE API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -122,9 +123,29 @@ def get_stats(db: Session = Depends(get_db)):
     }
 
 @app.post("/trash_log")
-def post_trash_logs(logs: list[TrashLogSchema], db: Session = Depends(get_db)):
-    """Receives batched raw trash detections from detect.py."""
-    db_logs = [DBMS.TrashLog(**log.model_dump()) for log in logs]
+async def post_trash_logs(request: Request, db: Session = Depends(get_db)):
+    """
+    Accepts detect.py batch format:
+      {"timestamp": "...", "camera_id": "CAM_01", "counts": {"Bottle": 3}}
+    OR legacy list: [{timestamp, camera_id, trash_type}, ...]
+    """
+    body = await request.json()
+    db_logs = []
+    if isinstance(body, dict) and "counts" in body:
+        ts        = datetime.fromisoformat(body["timestamp"])
+        camera_id = body["camera_id"]
+        for trash_type, count in body["counts"].items():
+            for _ in range(count):
+                db_logs.append(DBMS.TrashLog(timestamp=ts, camera_id=camera_id, trash_type=trash_type))
+    elif isinstance(body, list):
+        for item in body:
+            db_logs.append(DBMS.TrashLog(
+                timestamp  = datetime.fromisoformat(item["timestamp"]),
+                camera_id  = item["camera_id"],
+                trash_type = item["trash_type"],
+            ))
+    else:
+        return {"status": "error", "detail": "unrecognised payload format"}
     db.add_all(db_logs)
     db.commit()
     return {"status": "ok", "inserted": len(db_logs)}
@@ -132,7 +153,7 @@ def post_trash_logs(logs: list[TrashLogSchema], db: Session = Depends(get_db)):
 @app.get("/stats/history")
 def get_stats_history(db: Session = Depends(get_db)):
     """Returns total incidents and total trash per day for the last 7 days."""
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    seven_days_ago = datetime.now() - timedelta(days=7)
     
     # Daily Incidents
     incidents_daily = db.query(
@@ -152,7 +173,7 @@ def get_stats_history(db: Session = Depends(get_db)):
     dates = []
     # Build a list of the last 7 days as strings YYYY-MM-DD
     for i in range(6, -1, -1):
-        d = (datetime.utcnow() - timedelta(days=i)).strftime('%Y-%m-%d')
+        d = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
         dates.append(d)
 
     incidents_dict = {str(row.date): row.count for row in incidents_daily}
@@ -165,23 +186,65 @@ def get_stats_history(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/stats/today")
+def get_stats_today(db: Session = Depends(get_db)):
+    """Returns today's counts only — used by the dashboard stat cards."""
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    total   = db.query(DBMS.LitterIncident).filter(DBMS.LitterIncident.timestamp >= today_start).count()
+    trash   = db.query(DBMS.TrashLog).filter(DBMS.TrashLog.timestamp >= today_start).count()
+    vehicles = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.timestamp >= today_start,
+        DBMS.LitterIncident.offender_type == "vehicle"
+    ).count()
+    persons = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.timestamp >= today_start,
+        DBMS.LitterIncident.offender_type == "person"
+    ).count()
+    by_type = db.query(
+        DBMS.LitterIncident.trash_type,
+        func.count(DBMS.LitterIncident.id)
+    ).filter(DBMS.LitterIncident.timestamp >= today_start)     .group_by(DBMS.LitterIncident.trash_type).all()
+    return {
+        "total_incidents":   total,
+        "total_trash":       trash,
+        "vehicle_offenders": vehicles,
+        "person_offenders":  persons,
+        "by_trash_type":     {t: c for t, c in by_type},
+        "date":              today_start.strftime('%Y-%m-%d'),
+    }
+
+
+@app.get("/cameras/config")
+def get_cameras_config():
+    """Returns CAMERA_CONFIG from config.py so the frontend can auto-populate streams."""
+    from ml_pipeline.config import CAMERA_CONFIG
+    return [{"id": cam["id"], "label": cam["label"]} for cam in CAMERA_CONFIG]
+
+
 # ── MJPEG Stream Endpoints ─────────────────────────────────────
 latest_frames = {}
 frame_locks = collections.defaultdict(threading.Lock)
 camera_last_active = {}  # Tracks the last ping time of each camera
 
-def get_frame_generator(camera_id: str):
+async def get_frame_generator(camera_id: str):
+    last_frame = None
     try:
         while not shutdown_event.is_set():
             lock = frame_locks[camera_id]
             with lock:
                 frame = latest_frames.get(camera_id)
-                
-            if frame is None:
-                time.sleep(0.1)
+
+            if frame is None or frame is last_frame:
+                await asyncio.sleep(0.03)  # yield control, ~33ms
                 continue
-                
-            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+
+            last_frame = frame
+
+            loop = asyncio.get_event_loop()
+            _, jpeg = await loop.run_in_executor(
+                None,
+                lambda f=frame: cv2.imencode('.jpg', f, [cv2.IMWRITE_JPEG_QUALITY, 60]),
+            )
             frame_bytes = jpeg.tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
@@ -189,7 +252,7 @@ def get_frame_generator(camera_id: str):
         pass  # Client disconnected or server shut down — clean exit
 
 @app.get("/stream/{camera_id}")
-def video_stream(camera_id: str):
+async def video_stream(camera_id: str):
     return StreamingResponse(
         get_frame_generator(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame"
@@ -207,24 +270,43 @@ async def receive_frame(camera_id: str, request: Request):
         latest_frames[camera_id] = frame
     
     # Update last active time for this camera
-    camera_last_active[camera_id] = datetime.utcnow()
+    camera_last_active[camera_id] = datetime.now()
         
     return {"status": "ok"}
 
 @app.get("/cameras/active")
-def get_active_cameras():
-    """Returns cameras that sent a frame in the last 30 seconds."""
+def get_active_cameras(db: Session = Depends(get_db)):
+    """
+    Returns cameras that sent a frame in the last 30 seconds, along with
+    simple per‑camera aggregates pulled from the database:
+      - total_trash:   total TrashLog rows for this camera
+      - total_persons: total incidents with offender_type='person' for this camera
+      - total_vehicles: total incidents with offender_type='vehicle' for this camera
+    """
     now = datetime.now()
     active_cams = []
-    
+
     for cam_id, last_time in camera_last_active.items():
         if (now - last_time).total_seconds() <= 30:
+            total_trash = db.query(DBMS.TrashLog).filter(DBMS.TrashLog.camera_id == cam_id).count()
+            total_persons = db.query(DBMS.LitterIncident).filter(
+                DBMS.LitterIncident.camera_id == cam_id,
+                DBMS.LitterIncident.offender_type == "person",
+            ).count()
+            total_vehicles = db.query(DBMS.LitterIncident).filter(
+                DBMS.LitterIncident.camera_id == cam_id,
+                DBMS.LitterIncident.offender_type == "vehicle",
+            ).count()
+
             active_cams.append({
                 "id": cam_id,
                 "status": "Active",
-                "last_ping": last_time.isoformat()
+                "last_ping": last_time.isoformat(),
+                "total_trash": total_trash,
+                "total_persons": total_persons,
+                "total_vehicles": total_vehicles,
             })
-            
+
     return {"cameras": active_cams}
 
 # ── Serve Frontend ─────────────────────────────────────────────

@@ -1,35 +1,39 @@
-# config.py
+# config.py — TRACE unified configuration
 
-SOURCE = 1  # video file or 0 for webcam
+# ── Multi-camera registry ─────────────────────────────────────
+# Add one entry per camera.
+# source: int (webcam index), file path string, or RTSP URL string
+# Run all cameras:   python detect.py
+# Run one camera:    python detect.py --cam 0   (index into this list)
+CAMERA_CONFIG = [
+    {"id": "CAM_01", "source": 1,                             "label": "Front Gate"},
+    {"id": "CAM_02", "source": r"data\test_videos\test_vid_12.mp4",  "label": "Parking Lot"},
+    # {"id": "CAM_03", "source": ,        "label": "Back Entrance"},
+]
 
-VEHICLE_CLASSES = [2, 3, 5, 7]  # YOLO: car, motorcycle, bus, truck
+# ── Detection ─────────────────────────────────────────────────
+VEHICLE_CLASSES = [2, 3, 5, 7]  # YOLO COCO IDs: car, motorcycle, bus, truck
+PERSON_CONF     = 0.40           # confidence threshold for persons/vehicles
+TRASH_CONF      = 0.10           # confidence threshold for trash (low = max recall)
 
-# Detection confidence thresholds
-PERSON_CONF        = 0.40   # 40% - person/vehicle confidence
-TRASH_CONF         = 0.10   # 20% - trash confidence
+# ── State machine thresholds ──────────────────────────────────
+CARRY_DISTANCE        = 150   # px — person this close = carrying the trash
+SEPARATION_FRAMES     = 3     # frames separated before checking stationary
+STATIONARY_PIXELS     = 15    # px — movement below this = object not moving
+ABANDON_DISTANCE      = 200   # px — person this far = abandoned
+CANCEL_DISTANCE       = 80    # px — person returns this close = cancelled
+OWNER_MATCH_THRESHOLD = 120   # px — max shift to consider same person returning
 
-# Event logic thresholds
-PROXIMITY_THRESHOLD  = 300   # pixels - max distance between trash and suspect
-MEMORY_FRAME_COUNT   = 30    # frames before same trash location can re-trigger
-SKIP_FRAMES          = 1     # process every Nth frame
+# ── Memory / skip ─────────────────────────────────────────────
+PROXIMITY_THRESHOLD = 300   # px — max distance between trash and suspect
+MEMORY_FRAME_COUNT  = 90    # frames before stale track is purged
+SKIP_FRAMES         = 1     # run person detection every N frames (1 = every frame)
 
-# State machine thresholds
-CARRY_DISTANCE     = 150   # pixels - person this close = carrying object
-SEPARATION_FRAMES  = 8      # frames separated before marking stationary
-STATIONARY_PIXELS  = 15     # pixels moved - less than this = not moving
-ABANDON_DISTANCE   = 200    # pixels - person this far = abandoned object
-CANCEL_DISTANCE    = 80     # pixels - person returns this close = cancelled
-OWNER_MATCH_THRESHOLD = 120  # pixels - max distance to consider same person for cancellation
-
-# Storage
+# ── Storage ───────────────────────────────────────────────────
 SNAPSHOT_DIR = r"data\snapshots"
 
-# Camera
-CAMERA_ID = "CAM_01"
-
-
+# ── Backend ───────────────────────────────────────────────────
 BACKEND_URL = "http://localhost:8000"
 
-# ── Timing constants ──────────────────────────────────────────
-STREAM_EVERY_N_FRAMES = 1    # update buffer every frame — sender thread throttles itself
-BATCH_INTERVAL        = 10   # push trash log every 10 seconds
+# ── Timing ────────────────────────────────────────────────────
+BATCH_INTERVAL = 10   # seconds between trash log batch pushes to backend

@@ -313,6 +313,7 @@ function renderVehiclesTable(rows) {
 }
 
 let pieChartInstance = null;
+
 function updatePieChart(byType) {
   const ctx = document.getElementById('trashPieChart');
   if (!ctx) return;
@@ -334,8 +335,7 @@ function updatePieChart(byType) {
       datasets: [{
         data: data,
         backgroundColor: [
-          '#00d2ff', '#ff3366', '#ffaa00', '#00ffaa', '#8833ff'
-        ],
+          '#33ff57', '#ff3366', '#ffaa00', '#00ffaa', '#8833ff','#00d2ff','#ff66cc'],
         borderWidth: 0
       }]
     },
