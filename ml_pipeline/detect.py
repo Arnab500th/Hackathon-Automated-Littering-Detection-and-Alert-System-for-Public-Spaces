@@ -23,61 +23,107 @@ try:
 except ImportError:
     print("[WARN] api_client not found - backend posting disabled")
     API_AVAILABLE = False
-    def post_incident(event): print("[POST INCIDENT]", event)
+    def post_incident(event):
+        
+        print("[POST INCIDENT]", event)
 
 
 # ── Backend communication ─────────────────────────────────────
-# ALL http calls are fire-and-forget daemon threads.
-# They NEVER block the main video loop.
+#
+# Stream architecture:
+#   Main loop  →  writes latest frame to _stream_frame (no blocking)
+#   Sender thread  →  reads _stream_frame, encodes, POSTs at its own pace
+#
+# This means:
+#   - Main loop NEVER waits for HTTP or JPEG encode
+#   - Stream runs as fast as the network allows
+#   - If backend is slow, sender skips frames automatically (always sends latest)
 
-def _post_in_thread(url, **kwargs):
-    """Runs requests.post in a daemon thread - never blocks."""
-    def _run():
+_stream_frame      = None          # latest annotated frame (numpy array)
+_stream_frame_lock = threading.Lock()
+_stream_running    = True
+
+
+def _stream_sender_thread(camera_id):
+    """
+    Dedicated daemon thread: continuously encodes and POSTs
+    the latest frame to the backend stream endpoint.
+    Runs independently of the main loop at its own pace.
+    """
+    last_sent = None
+    while _stream_running:
+        with _stream_frame_lock:
+            frame = _stream_frame
+
+        # No frame yet or same frame as last send — wait a bit
+        if frame is None or frame is last_sent:
+            time.sleep(0.02)
+            continue
+
+        last_sent = frame
         try:
-            requests.post(url, timeout=2.0, **kwargs)
+            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            requests.post(
+                f"{BACKEND_URL}/frame/{camera_id}",
+                data=jpeg.tobytes(),
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=1.0
+            )
         except Exception:
             pass
-    threading.Thread(target=_run, daemon=True).start()
 
 
 def push_frame_to_backend(frame, camera_id):
     """
-    Sends annotated frame to /frame/{camera_id} for MJPEG stream.
-    Quality=40 keeps payload ~15KB. Called every STREAM_EVERY_N_FRAMES.
+    Main loop calls this. Just writes frame reference to shared buffer.
+    Returns instantly — no encoding, no HTTP, no thread spawn.
+    The sender thread handles the rest.
     """
-    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 40])
-    _post_in_thread(
-        f"{BACKEND_URL}/frame/{camera_id}",
-        data=jpeg.tobytes(),
-        headers={"Content-Type": "application/octet-stream"}
-    )
+    global _stream_frame
+    with _stream_frame_lock:
+        _stream_frame = frame   # sender thread picks this up
 
 
 def post_trash_log(trash_counts, camera_id):
     """
     Sends ONE batched summary every BATCH_INTERVAL seconds.
     { timestamp, camera_id, counts: {label: peak_count} }
-    Never sends per-frame - that would kill the DB.
     """
     if not trash_counts:
         return
-    _post_in_thread(
-        f"{BACKEND_URL}/trash_log",
-        json={
-            "timestamp": datetime.utcnow().isoformat(),
-            "camera_id": camera_id,
-            "counts":    trash_counts
-        }
-    )
+    def _send():
+        try:
+            requests.post(
+                f"{BACKEND_URL}/trash_log",
+                json={
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "camera_id": camera_id,
+                    "counts":    trash_counts
+                },
+                timeout=2.0
+            )
+        except Exception:
+            pass
+    threading.Thread(target=_send, daemon=True).start()
 
 
 # ── Timing constants ──────────────────────────────────────────
-STREAM_EVERY_N_FRAMES = 15   # ~2fps stream at 30fps detection
+STREAM_EVERY_N_FRAMES = 1    # update buffer every frame — sender thread throttles itself
 BATCH_INTERVAL        = 10   # push trash log every 10 seconds
 
 # ── Models ────────────────────────────────────────────────────
 person_model = YOLO(r"ml_pipeline\weights\yolov8s.pt")
 trash_model  = YOLO(r"ml_pipeline\weights\taco_8s_v3.pt")
+
+# ── Start stream sender thread ────────────────────────────────
+# One persistent thread handles all frame POSTing independently
+_sender = threading.Thread(
+    target=_stream_sender_thread,
+    args=(CAMERA_ID,),
+    daemon=True,
+    name="StreamSender"
+)
+_sender.start()
 
 # ── Folder setup ──────────────────────────────────────────────
 os.makedirs(f"{SNAPSHOT_DIR}/persons",  exist_ok=True)
@@ -579,8 +625,7 @@ while True:
             max_trash_in_batch = {}
             last_batch_time    = curr_time
 
-        if frame_count % STREAM_EVERY_N_FRAMES == 0:
-            push_frame_to_backend(frame, CAMERA_ID)
+        push_frame_to_backend(frame, CAMERA_ID)
 
         cv2.imshow("LitterWatch", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -635,14 +680,14 @@ while True:
         max_trash_in_batch = {}
         last_batch_time    = curr_time
 
-    if frame_count % STREAM_EVERY_N_FRAMES == 0:
-        push_frame_to_backend(frame, CAMERA_ID)
+    push_frame_to_backend(frame, CAMERA_ID)
 
     cv2.imshow("LitterWatch", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 # ── Cleanup ───────────────────────────────────────────────────
+_stream_running = False   # signal sender thread to stop
 vid.release()
 cv2.destroyAllWindows()
 print(f"\nSession ended.")
