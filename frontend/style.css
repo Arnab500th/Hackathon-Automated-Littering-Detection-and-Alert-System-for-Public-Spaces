@@ -69,10 +69,19 @@ header {
 .logo { display: flex; align-items: center; gap: 10px; }
 
 .logo-icon {
-  width: 28px; height: 28px;
+  width: 32px; height: 32px;
+  /* if using an image element, the following are ignored */
   background: var(--accent);
   clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   animation: pulse-icon 2.5s ease-in-out infinite;
+}
+
+/* ensure img inside logo scales */
+.logo img.logo-icon {
+  display: block;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 @keyframes pulse-icon {
   0%, 100% { opacity: 1; }
