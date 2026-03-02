@@ -87,7 +87,7 @@ class StreamSender:
                     timeout=1.0,
                 )
             except Exception:
-                pass  # never crash detection due to stream issues
+                pass  
             time.sleep(0.033)  # enforce ~30fps ceiling
 
     def push_frame(self, frame):
