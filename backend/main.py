@@ -204,7 +204,7 @@ async def receive_frame(camera_id: str, request: Request):
 @app.get("/cameras/active")
 def get_active_cameras():
     """Returns cameras that sent a frame in the last 30 seconds."""
-    now = datetime.utcnow()
+    now = datetime.now()
     active_cams = []
     
     for cam_id, last_time in camera_last_active.items():

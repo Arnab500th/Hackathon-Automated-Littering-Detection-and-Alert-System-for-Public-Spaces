@@ -1,6 +1,6 @@
 # config.py
 
-SOURCE =r"data\test_videos\test_vid_2.mp4"  # video file or 0 for webcam
+SOURCE = 1  # video file or 0 for webcam
 
 VEHICLE_CLASSES = [2, 3, 5, 7]  # YOLO: car, motorcycle, bus, truck
 
@@ -30,4 +30,6 @@ CAMERA_ID = "CAM_01"
 
 BACKEND_URL = "http://localhost:8000"
 
-
+# ── Timing constants ──────────────────────────────────────────
+STREAM_EVERY_N_FRAMES = 1    # update buffer every frame — sender thread throttles itself
+BATCH_INTERVAL        = 10   # push trash log every 10 seconds

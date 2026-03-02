@@ -15,7 +15,10 @@ try:
 except ImportError:
     print("[WARN] ocr_module not found - OCR disabled")
     OCR_AVAILABLE = False
-    def read_plate_from_frame(frame, box): return None
+
+    def read_plate_from_frame(frame, box): 
+        
+        return None
 
 try:
     from api_client import post_incident
@@ -57,12 +60,12 @@ def _stream_sender_thread(camera_id):
 
         # No frame yet or same frame as last send — wait a bit
         if frame is None or frame is last_sent:
-            time.sleep(0.02)
+            time.sleep(0.01)
             continue
 
         last_sent = frame
         try:
-            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 20])
             requests.post(
                 f"{BACKEND_URL}/frame/{camera_id}",
                 data=jpeg.tobytes(),
@@ -96,7 +99,7 @@ def post_trash_log(trash_counts, camera_id):
             requests.post(
                 f"{BACKEND_URL}/trash_log",
                 json={
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now().isoformat(),
                     "camera_id": camera_id,
                     "counts":    trash_counts
                 },
@@ -107,9 +110,6 @@ def post_trash_log(trash_counts, camera_id):
     threading.Thread(target=_send, daemon=True).start()
 
 
-# ── Timing constants ──────────────────────────────────────────
-STREAM_EVERY_N_FRAMES = 1    # update buffer every frame — sender thread throttles itself
-BATCH_INTERVAL        = 10   # push trash log every 10 seconds
 
 # ── Models ────────────────────────────────────────────────────
 person_model = YOLO(r"ml_pipeline\weights\yolov8s.pt")
@@ -117,8 +117,7 @@ trash_model  = YOLO(r"ml_pipeline\weights\taco_8s_v3.pt")
 
 # ── Start stream sender thread ────────────────────────────────
 # One persistent thread handles all frame POSTing independently
-_sender = threading.Thread(
-    target=_stream_sender_thread,
+_sender = threading.Thread(target=_stream_sender_thread,
     args=(CAMERA_ID,),
     daemon=True,
     name="StreamSender"
@@ -167,13 +166,14 @@ ZONE_NAMES = {
 
 
 # ── Helper functions ──────────────────────────────────────────
-
+#if ByteTrack fails then grid key will be used
 def get_grid_key(box):
     cx = (box[0] + box[2]) // 2
     cy = (box[1] + box[3]) // 2
     return (int(cx) // 50, int(cy) // 50)
 
-
+#divides the frame into 3*2 grid 
+#TODO : might remove this later feels useless
 def get_zone(box):
     if frame_w == 0 or frame_h == 0:
         return "Unknown"
@@ -183,7 +183,7 @@ def get_zone(box):
     row = min(int((cy / frame_h) * ZONE_ROWS), ZONE_ROWS - 1)
     return ZONE_NAMES.get((row, col), f"Z{row}{col}")
 
-
+#find the euclidian distance between two boxes
 def get_distance(box_a, box_b):
     ax = (box_a[0] + box_a[2]) / 2
     ay = (box_a[1] + box_a[3]) / 2
@@ -342,8 +342,8 @@ def update_object_state(key, current_box, prev_box, persons, vehicles, frame):
     # ── SEPARATION ────────────────────────────────────────────
     elif state == "SEPARATION":
         suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
-        if suspect_box is not None and \
-           get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
+        if suspect_box is not None and get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
+            
             if is_same_person(suspect_box, state_info.get("owner_last_pos")):
                 state_info["state"] = "CANCELLED"
                 print("[CANCEL] Owner returned during separation")
@@ -465,9 +465,7 @@ def detect_litter(trash_boxes, trash_labels, trash_ids, persons, vehicles, frame
 def run_trash_detection(frame, persons, vehicles):
     global last_drawn_trash, current_trash_counts, current_zone_counts
 
-    trash_detection = trash_model.track(
-        frame, persist=True, tracker="bytetrack.yaml", verbose=False
-    )[0]
+    trash_detection = trash_model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
 
     trash_boxes       = []
     trash_labels      = []
@@ -498,10 +496,10 @@ def run_trash_detection(frame, persons, vehicles):
         if key in object_states:
             object_states[key]["confidence"] = conf
 
-        smooth     = smooth_coords(smoothed_boxes, key, coords)
-        state      = object_states.get(key, {}).get("state", "UNKNOWN")
-        color      = STATE_COLORS.get(state, (225, 225, 225))
-        id_str     = f"#{track_id}" if track_id else ""
+        smooth = smooth_coords(smoothed_boxes, key, coords)
+        state = object_states.get(key, {}).get("state", "UNKNOWN")
+        color = STATE_COLORS.get(state, (225, 225, 225))
+        id_str = f"#{track_id}" if track_id else ""
 
         dwell_str = ""
         if state == "STATIONARY":
@@ -592,11 +590,12 @@ while True:
         break
 
     frame_count += 1
-    curr_time    = time.time()
-    fps          = 1 / (curr_time - prev_time + 1e-9)
-    prev_time    = curr_time
+    curr_time = time.time()
+    fps = 1 / (curr_time - prev_time + 1e-9)
+    prev_time = curr_time
 
     # ── SKIPPED FRAME ─────────────────────────────────────────
+    #NOTE: this never runs lol
     if frame_count % SKIP_FRAMES != 0:
 
         for coords, label in last_drawn_persons:
@@ -604,9 +603,7 @@ while True:
         for coords, label in last_drawn_vehicles:
             draw_rect(frame, coords, label, (0, 165, 255))
 
-        events, trash_counts, zone_counts = run_trash_detection(
-            frame, last_known_persons, last_known_vehicles
-        )
+        events, trash_counts, zone_counts = run_trash_detection(frame, last_known_persons, last_known_vehicles)
 
         if events:
             for event in events:
@@ -659,7 +656,7 @@ while True:
             draw_rect(frame, coords, label, (0, 165, 255))
             last_drawn_vehicles.append((coords, label))
 
-    last_known_persons  = persons
+    last_known_persons = persons
     last_known_vehicles = vehicles
 
     events, trash_counts, zone_counts = run_trash_detection(frame, persons, vehicles)
@@ -678,7 +675,7 @@ while True:
     if curr_time - last_batch_time >= BATCH_INTERVAL:
         post_trash_log(max_trash_in_batch, CAMERA_ID)
         max_trash_in_batch = {}
-        last_batch_time    = curr_time
+        last_batch_time = curr_time
 
     push_frame_to_backend(frame, CAMERA_ID)
 
