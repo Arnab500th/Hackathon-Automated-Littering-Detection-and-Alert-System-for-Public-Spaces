@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +16,16 @@ from sqlalchemy import func, cast, Date
 from datetime import datetime, timedelta
 import os
 
-app = FastAPI(title="LitterWatch API")
+# Graceful shutdown flag
+shutdown_event = threading.Event()
+
+@asynccontextmanager
+async def lifespan(app):
+    yield
+    # Signal all streaming generators to stop
+    shutdown_event.set()
+
+app = FastAPI(title="LitterWatch API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -162,7 +172,7 @@ camera_last_active = {}  # Tracks the last ping time of each camera
 
 def get_frame_generator(camera_id: str):
     try:
-        while True:
+        while not shutdown_event.is_set():
             lock = frame_locks[camera_id]
             with lock:
                 frame = latest_frames.get(camera_id)

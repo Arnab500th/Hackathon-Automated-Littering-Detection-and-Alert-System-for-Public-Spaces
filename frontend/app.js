@@ -7,8 +7,8 @@ const API = 'http://localhost:8000';
 // camera's config.py. stream_url is the MJPEG endpoint.
 // To add cameras during demo: click "+ Add Camera" in Live Feed.
 let CAMERAS = [
-  { id: 'CAM_01', label: 'Main Entrance',  stream_url: `${API}/stream/CAM_01` },
-  { id: 'CAM_02', label: 'Parking Lot',    stream_url: `${API}/stream/CAM_02` },
+  { id: 'CAM_01', label: 'Main Entrance', stream_url: `${API}/stream/CAM_01` },
+  { id: 'CAM_02', label: 'Parking Lot', stream_url: `${API}/stream/CAM_02` },
 ];
 
 // ── State ─────────────────────────────────────────────────────
@@ -27,11 +27,11 @@ function showPage(name, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  if(el) el.classList.add('active');
+  if (el) el.classList.add('active');
 
   if (name === 'incidents') loadIncidents();
-  if (name === 'vehicles')  loadVehicles();
-  if (name === 'stream')    renderCameraGrid();
+  if (name === 'vehicles') loadVehicles();
+  if (name === 'stream') renderCameraGrid();
   if (name === 'dashboard') { loadStats(); loadRecentIncidents(); loadHistory(); }
   if (name === 'live-stats') loadLiveStats();
 }
@@ -39,17 +39,17 @@ function showPage(name, el) {
 // ── Connection status ─────────────────────────────────────────
 function setConnected(ok) {
   const label = document.getElementById('connection-label');
-  const dot   = document.querySelector('.live-dot');
+  const dot = document.querySelector('.live-dot');
   if (ok) {
-    dot.style.background  = 'var(--ok)';
-    dot.style.animation   = 'blink 1.2s ease-in-out infinite';
-    label.textContent     = 'BACKEND ONLINE';
-    label.style.color     = 'var(--ok)';
+    dot.style.background = 'var(--ok)';
+    dot.style.animation = 'blink 1.2s ease-in-out infinite';
+    label.textContent = 'BACKEND ONLINE';
+    label.style.color = 'var(--ok)';
   } else {
-    dot.style.background  = 'var(--warn)';
-    dot.style.animation   = 'none';
-    label.textContent     = 'BACKEND OFFLINE';
-    label.style.color     = 'var(--warn)';
+    dot.style.background = 'var(--warn)';
+    dot.style.animation = 'none';
+    label.textContent = 'BACKEND OFFLINE';
+    label.style.color = 'var(--warn)';
   }
 }
 
@@ -66,14 +66,14 @@ async function loadStats() {
     const data = await apiFetch('/stats');
     setConnected(true);
 
-    document.getElementById('stat-total').textContent       = data.total_incidents   ?? '0';
-    document.getElementById('stat-total-trash').textContent = data.total_trash       ?? '0';
-    document.getElementById('stat-persons').textContent     = data.person_offenders  ?? '0';
-    document.getElementById('stat-vehicles').textContent    = data.vehicle_offenders ?? '0';
-    
-    document.getElementById('sb-total').textContent         = data.total_incidents   ?? '0';
-    document.getElementById('sb-persons').textContent       = data.person_offenders  ?? '0';
-    document.getElementById('sb-vehicles').textContent      = data.vehicle_offenders ?? '0';
+    document.getElementById('stat-total').textContent = data.total_incidents ?? '0';
+    document.getElementById('stat-total-trash').textContent = data.total_trash ?? '0';
+    document.getElementById('stat-persons').textContent = data.person_offenders ?? '0';
+    document.getElementById('stat-vehicles').textContent = data.vehicle_offenders ?? '0';
+
+    document.getElementById('sb-total').textContent = data.total_incidents ?? '0';
+    document.getElementById('sb-persons').textContent = data.person_offenders ?? '0';
+    document.getElementById('sb-vehicles').textContent = data.vehicle_offenders ?? '0';
 
     updatePieChart(data.by_trash_type || {});
     await loadActiveCameras();
@@ -98,13 +98,13 @@ async function loadActiveCameras() {
     const data = await apiFetch('/cameras/active');
     const cams = data.cameras || [];
     document.getElementById('active-cam-count').textContent = cams.length;
-    
+
     const list = document.getElementById('active-cam-list');
     if (cams.length === 0) {
       list.innerHTML = '<div class="no-data">No cameras online</div>';
       return;
     }
-    
+
     list.innerHTML = cams.map(c => `
       <div class="cam-item">
         <div class="cam-dot"></div>
@@ -114,7 +114,7 @@ async function loadActiveCameras() {
         </div>
       </div>
     `).join('');
-  } catch(e) { /* silent */ }
+  } catch (e) { /* silent */ }
 }
 
 let historyChartInstance = null;
@@ -122,8 +122,8 @@ async function loadHistory() {
   try {
     const data = await apiFetch('/stats/history');
     const ctx = document.getElementById('historyBarChart');
-    if(!ctx) return;
-    
+    if (!ctx) return;
+
     if (historyChartInstance) {
       historyChartInstance.data.labels = data.labels;
       historyChartInstance.data.datasets[0].data = data.incidents;
@@ -131,7 +131,7 @@ async function loadHistory() {
       historyChartInstance.update();
       return;
     }
-    
+
     historyChartInstance = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -141,13 +141,15 @@ async function loadHistory() {
             label: 'Confirmed Incidents',
             data: data.incidents,
             backgroundColor: '#ff3366',
-            borderRadius: 4
+            borderRadius: 4,
+            minBarLength: 2
           },
           {
             label: 'Total Trash Spotted',
             data: data.trash,
             backgroundColor: '#00d2ff',
-            borderRadius: 4
+            borderRadius: 4,
+            minBarLength: 2
           }
         ]
       },
@@ -155,30 +157,32 @@ async function loadHistory() {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { labels: { color: '#a1a1aa', font: {family: 'JetBrains Mono'} } }
+          legend: { labels: { color: '#a1a1aa', font: { family: 'JetBrains Mono' } } }
         },
         scales: {
-          y: { 
-            beginAtZero: true, 
+          y: {
+            beginAtZero: true,
+            suggestedMax: 1,
             grid: { color: '#27272a' },
-            ticks: { color: '#a1a1aa', font: {family: 'JetBrains Mono'} }
+            ticks: { color: '#a1a1aa', font: { family: 'JetBrains Mono' }, stepSize: 1 }
           },
-          x: { 
+          x: {
             grid: { display: false },
-            ticks: { color: '#a1a1aa', font: {family: 'JetBrains Mono'} }
+            ticks: { color: '#a1a1aa', font: { family: 'JetBrains Mono' } }
           }
         }
       }
     });
 
-  } catch(e) { /* silent */ }
+  } catch (e) { /* silent */ }
 }
 
 // ── Load vehicles ─────────────────────────────────────────────
 async function loadVehicles() {
   try {
     const data = await apiFetch('/vehicles');
-    document.getElementById('stat-unique-v').textContent = data.length ?? '0';
+    const el = document.getElementById('stat-unique-v');
+    if (el) el.textContent = data.length ?? '0';
     renderVehiclesTable(data);
   } catch (e) {
     document.getElementById('vehicles-tbody').innerHTML =
@@ -233,7 +237,7 @@ function thumbCell(path) {
   if (!path) return '<div class="no-img">N/A</div>';
   // Strip absolute path, keep relative part after snapshots/
   const rel = path.replace(/^.*snapshots[/\\]/, '');
-  const url  = `${API}/snapshots/${rel}`;
+  const url = `${API}/snapshots/${rel}`;
   return `<img class="thumb" src="${url}"
     onclick="openLightbox('${url}')"
     title="Click to enlarge"
@@ -253,8 +257,8 @@ function renderRecentTable(rows) {
       <td>${r.trash_type || '—'}</td>
       <td>${offenderBadge(r.offender_type)}</td>
       <td>${r.license_plate
-            ? `<span class="badge badge-plate">${r.license_plate}</span>`
-            : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+      ? `<span class="badge badge-plate">${r.license_plate}</span>`
+      : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
       <td style="font-family:var(--font-mono);color:var(--accent)">
         ${r.trash_confidence ? (r.trash_confidence * 100).toFixed(0) + '%' : '—'}
       </td>
@@ -280,8 +284,8 @@ function renderAllTable(rows) {
       </td>
       <td>${offenderBadge(r.offender_type)}</td>
       <td>${r.license_plate
-            ? `<span class="badge badge-plate">${r.license_plate}</span>`
-            : '—'}</td>
+      ? `<span class="badge badge-plate">${r.license_plate}</span>`
+      : '—'}</td>
       <td style="font-family:var(--font-mono);color:${r.alert_sent ? 'var(--ok)' : 'var(--muted)'}">
         ${r.alert_sent ? 'YES' : 'NO'}
       </td>
@@ -311,18 +315,18 @@ function renderVehiclesTable(rows) {
 let pieChartInstance = null;
 function updatePieChart(byType) {
   const ctx = document.getElementById('trashPieChart');
-  if(!ctx) return;
-  
+  if (!ctx) return;
+
   const labels = Object.keys(byType);
   const data = Object.values(byType);
-  
+
   if (pieChartInstance) {
     pieChartInstance.data.labels = labels;
     pieChartInstance.data.datasets[0].data = data;
     pieChartInstance.update();
     return;
   }
-  
+
   pieChartInstance = new Chart(ctx, {
     type: 'pie',
     data: {
@@ -341,7 +345,7 @@ function updatePieChart(byType) {
       plugins: {
         legend: {
           position: 'right',
-          labels: { color: '#a1a1aa', font: {family: 'JetBrains Mono', size: 11} }
+          labels: { color: '#a1a1aa', font: { family: 'JetBrains Mono', size: 11 } }
         }
       }
     }
@@ -354,12 +358,12 @@ async function loadLiveStats() {
     const data = await apiFetch('/cameras/active');
     const cams = data.cameras || [];
     const container = document.getElementById('live-stats-container');
-    
+
     if (cams.length === 0) {
       container.innerHTML = '<div class="no-data">No cameras are currently online providing data.</div>';
       return;
     }
-    
+
     container.innerHTML = cams.map(c => `
       <div class="panel cam-stat-card">
         <div class="cam-stat-header">
@@ -377,8 +381,8 @@ async function loadLiveStats() {
         </div>
       </div>
     `).join('');
-    
-  } catch(e) {
+
+  } catch (e) {
     console.error(e);
   }
 }
@@ -404,7 +408,7 @@ function renderCameraGrid() {
 }
 
 function camOk(id) {
-  const slot  = document.getElementById('slot-' + id);
+  const slot = document.getElementById('slot-' + id);
   const label = slot ? slot.querySelector('.cam-label') : null;
   if (label) {
     label.style.color = 'var(--ok)';
@@ -433,10 +437,10 @@ function refreshStreams() {
 }
 
 function addCameraPrompt() {
-  const id    = prompt('Camera ID (must match CAMERA_ID in config.py):\ne.g. CAM_03');
+  const id = prompt('Camera ID (must match CAMERA_ID in config.py):\ne.g. CAM_03');
   if (!id) return;
   const label = prompt('Display label:\ne.g. Back Entrance') || id;
-  const host  = prompt('Backend host (leave blank for localhost:8000):') || 'localhost:8000';
+  const host = prompt('Backend host (leave blank for localhost:8000):') || 'localhost:8000';
   CAMERAS.push({
     id,
     label,
@@ -461,7 +465,7 @@ document.addEventListener('keydown', e => {
 // ── Toast ─────────────────────────────────────────────────────
 function showToast(title, body) {
   const container = document.getElementById('toasts');
-  const toast     = document.createElement('div');
+  const toast = document.createElement('div');
   toast.className = 'toast';
   toast.innerHTML = `
     <div class="toast-title">${title}</div>
@@ -476,7 +480,7 @@ setInterval(() => {
   loadStats();
   loadRecentIncidents();
   // We don't poll loadHistory() every 5s since it's a 7-day view, updated on new incident
-  
+
   const activePage = document.querySelector('.page.active');
   if (activePage && activePage.id === 'page-live-stats') {
     loadLiveStats();
