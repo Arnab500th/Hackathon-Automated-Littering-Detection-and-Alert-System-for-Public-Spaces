@@ -1,8 +1,6 @@
-# ============================================================
+
 # Automated Littering Detection & Alert System
-# ============================================================
 # Hackathon Prototype | AI-powered Real-time Urban Surveillance
-# ============================================================
 
 
 # 🧠 Project Overview
@@ -32,9 +30,7 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
 - Urban monitoring systems
 
 
-# ============================================================
 # 🔁 System Architecture
-# ============================================================
 
  Cameras (USB / RTSP / Video Files)
             ↓
@@ -59,9 +55,7 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
      Admin Dashboard
 
 
-# ============================================================
 # ⚙️ Processing Pipeline
-# ============================================================
 
  Capture Frame
        ↓
@@ -81,9 +75,7 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
  Backend Logging + Dashboard Update
 
 
-# ============================================================
 # 🚀 Key Features
-# ============================================================
 
 ✅ Multi-camera real-time processing  
 ✅ Threaded streaming pipeline (zero FPS impact)  
@@ -101,9 +93,7 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
 ✅ Cost-effective AI surveillance solution  
 
 
-# ============================================================
 # 🧠 Tech Stack
-# ============================================================
 
 # 🔬 ML & Computer Vision
 
@@ -137,9 +127,7 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
 | Streaming   | MJPEG |
 
 
-# ============================================================
 # 📊 Performance Benchmarks
-# ============================================================
 
 # Test Machine:
 # CPU: Intel i5-12450HX
@@ -156,9 +144,7 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
 ✔ Fully real-time detection  
 
 
-# ============================================================
 # 📁 Folder Structure
-# ============================================================
 
 LitterWatch/
 │
@@ -186,9 +172,7 @@ LitterWatch/
 └── README.md
 
 
-# ============================================================
 # ⚡ Installation & Setup
-# ============================================================
 
 # 1️⃣ Clone Repository
 ```
@@ -217,9 +201,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-# ============================================================
 # ▶️ Running The System
-# ============================================================
 
 # Start Backend Server
 ```
@@ -238,9 +220,7 @@ or
 http://localhost:8000
 
 
-# ============================================================
 # 📦 Dataset
-# ============================================================
 
 Primary Dataset Used:
 
@@ -250,9 +230,7 @@ Primary Dataset Used:
 - Used for custom YOLOv8 training  
 
 
-# ============================================================
 # 🧾 Output & Evidence
-# ============================================================
 
 System automatically stores:
 
@@ -263,9 +241,7 @@ System automatically stores:
 🎥 Live MJPEG streams  
 
 
-# ============================================================
 # ⚠️ Limitations & Challenges
-# ============================================================
 
 ⚠️ Reduced detection in low-light & adverse weather  
 ⚠️ Camera angle variability  
@@ -274,9 +250,7 @@ System automatically stores:
 ⚠️ Dataset size constraints for hand-object detection  
 
 
-# ============================================================
 # 🔮 Future Scope
-# ============================================================
 
 🚀 WebRTC ultra-low latency streaming  
 🚀 Edge AI deployment (Jetson Nano / Orin)  
@@ -287,9 +261,7 @@ System automatically stores:
 🚀 Automated challan generation  
 
 
-# ============================================================
 # 🖼️ Screenshots
-# ============================================================
 
 ## Dash Board screenshots
 
@@ -314,9 +286,7 @@ docs\screenshots\car.jpg
 
 
 
-# ============================================================
 # 🏆 Deployment Status
-# ============================================================
 
 ### Currently runs on Local not deployed
 
@@ -326,9 +296,7 @@ docs\screenshots\car.jpg
 ✔ Scalable architecture  
 
 
-# ============================================================
 # 👨‍💻 Team
-# ============================================================
 
 👤 Arnab Datta  (Team Leader) All Rounder- Ml Pipeline, Testing, Connecting 
 👤 Sumit Paul  (Team Member) Backend, Database 
@@ -337,23 +305,21 @@ docs\screenshots\car.jpg
 📍 India  
 
 Core Technologies:
+
 YOLOv8 · ByteTrack · EasyOCR · FastAPI · OpenCV · Chart.js  
 
 Dataset:
+
 TACO Dataset  
 COCO Dataset
 
 
-# ============================================================
 # 📜 License
-# ============================================================
 
 MIT License — Free for research & academic use.
 
 
-# ============================================================
 # ⭐ Final Note
-# ============================================================
 
 This project demonstrates a **complete real-time AI surveillance pipeline** 
 integrating:
