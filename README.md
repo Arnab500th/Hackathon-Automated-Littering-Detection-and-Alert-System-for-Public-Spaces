@@ -1,4 +1,3 @@
-
 # Automated Littering Detection & Alert System
 # Hackathon Prototype | AI-powered Real-time Urban Surveillance
 
@@ -32,27 +31,27 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
 
 # 🔁 System Architecture
 
- Cameras (USB / RTSP / Video Files)
-            ↓
- Multi-Threaded Frame Capture
-            ↓
-     YOLOv8 Detection
-   (Person + Litter + Vehicle)
-            ↓
-     ByteTrack Tracking
-            ↓
-      State Machine
- (Carry → Drop → Stationary → Abandon)
-            ↓
- Evidence Capture + EasyOCR
-            ↓
-     FastAPI Backend
-            ↓
-    Database + Analytics
-            ↓
-   MJPEG Live Streaming
-            ↓
-     Admin Dashboard
+ Cameras (USB / RTSP / Video Files)  
+            ↓  
+ Multi-Threaded Frame Capture  
+            ↓  
+     YOLOv8 Detection  
+   (Person + Litter + Vehicle)  
+            ↓  
+     ByteTrack Tracking  
+            ↓  
+      State Machine  
+ (Carry → Drop → Stationary → Abandon)  
+            ↓  
+ Evidence Capture + EasyOCR  
+            ↓  
+     FastAPI Backend  
+            ↓  
+    Database + Analytics  
+            ↓  
+   MJPEG Live Streaming  
+            ↓  
+     Admin Dashboard  
 
 
 # ⚙️ Processing Pipeline
@@ -146,30 +145,30 @@ complete **end-to-end AI + Backend + Dashboard pipeline**.
 
 # 📁 Folder Structure
 
-LitterWatch/
-│
-├── backend/
-│   ├── main.py
-│   ├── DBMS.py
-│   ├── database.py
-│   └── main.db
-│
-├── frontend/
-│   ├── index.html
-│   ├── app.js
-│   └── styles.css
-│
-├── ml_pipeline/
-│   ├── detect.py
-│   ├── api_client.py
-│   ├── config.py
-│   └── models/
-│
-├── docs/
-├── test/
-├── training/
-│
-└── README.md
+LitterWatch/  
+│  
+├── backend/  
+│    ├── main.py  
+│    ├── DBMS.py  
+│    ├── database.py  
+│    └── main.db  
+│  
+├── frontend/  
+│   ├── index.html  
+│   ├── app.js  
+│   └── styles.css  
+│  
+├── ml_pipeline/  
+│   ├── detect.py  
+│   ├── api_client.py  
+│   ├── config.py  
+│   └── models/  
+│  
+├── docs/  
+├── test/  
+├── training/  
+│  
+└── README.md  
 
 
 # ⚡ Installation & Setup
@@ -265,25 +264,43 @@ System automatically stores:
 
 ## Dash Board screenshots
 
-docs\screenshots\DashBoard.png
-docs\screenshots\incidents.png
-docs\screenshots\Live Feed.png
+DashBoard.png  
+
+<img width="1919" height="874" alt="DashBoard" src="docs\screenshots\DashBoard.png" />
+Incidents.png  
+
+<img width="1916" height="874" alt="incidents" src="docs\screenshots\incidents.png" />
+Live Feed.png  
+
+<img width="1916" height="874" alt="incidents" src="docs\screenshots\Live Feed.png" />
 
 ## Program
-docs\screenshots\Detect.png
+Detect.png  
 
+<img width="1916" height="874" alt="incidents" src="docs\screenshots\Detect.png" />
 ## Full Image Snap Shots
-docs\screenshots\full.jpg
-docs\screenshots\full2.jpg
-docs\screenshots\full3.jpg
+full.jpg  
 
-## Offenders SnapShots
-docs\screenshots\culprit_1.jpg
-docs\screenshots\culprit_2.jpg
+<img width="478" height="850" alt="incidents" src="docs\screenshots\full.jpg" />
+full2.jpg  
 
-## Vehicles
-docs\screenshots\car.jpg
+<img width="478" height="850" alt="incidents" src="docs\screenshots\full2.jpg" />
+full3.jpg  
 
+<img width="478" height="850" alt="incidents" src="docs\screenshots\full3.jpg" />
+
+## Offenders SnapShots  
+culprit_1.jpg  
+
+<img width="158" height="383" alt="incidents" src="docs\screenshots\culprit_1.jpg" />
+culprit_2.jpg  
+
+<img width="149" height="320" alt="incidents" src="docs\screenshots\culprit_2.jpg" />  
+
+## Vehicles  
+
+car.jpg  
+<img width="265" height="347" alt="incidents" src="docs\screenshots\car.jpg" />
 
 
 # 🏆 Deployment Status
@@ -298,25 +315,62 @@ docs\screenshots\car.jpg
 
 # 👨‍💻 Team
 
-👤 Arnab Datta  (Team Leader) All Rounder- Ml Pipeline, Testing, Connecting 
-👤 Sumit Paul  (Team Member) Backend, Database 
-👤 Deepraj Paul  (Team Member) UI UX Design, Docs,PPt 
+👤 **Arnab Datta** — *Team Leader*  
+ML Pipeline Architecture • Model Training • Detection Logic • System Integration • Testing • Project Planning  
+
+👤 **Sumit Paul** — *Backend Engineer*  
+FastAPI Backend • Database Design • API Development • Data Handling  
+
+👤 **Deepraj Paul** — *Frontend & Documentation Lead*  
+UI/UX Design • Dashboard Development • Project Documentation • Presentation Design  
 
 📍 India  
 
-Core Technologies:
+**Core Technologies:**
 
 YOLOv8 · ByteTrack · EasyOCR · FastAPI · OpenCV · Chart.js  
 
-Dataset:
+# 📦 Dataset Credits
 
-TACO Dataset  
-COCO Dataset
+• **TACO** — Trash Annotations in Context Dataset  
+  https://tacodataset.org  
+  Used for training the trash detection model.
 
+• **COCO** — Common Objects in Context Dataset  
+  https://cocodataset.org  
+  Used via pretrained YOLOv8 weights for person & vehicle detection.
+
+# 📚 Research References & Inspiration
+
+This project is inspired by and aligned with current academic research in automated litter detection, 
+computer vision–based surveillance, and intelligent environmental monitoring systems. The design of the 
+detection pipeline, tracking strategy, and state-machine-based decision logic is guided by the following works:
+
+• **SAWN: A Smart Alert and Warning Network for Littering Surveillance**  
+  Nature Scientific Reports, 2025  
+  https://www.nature.com/articles/s41598-024-77118-x  
+
+• **Real-time Detection and Monitoring of Public Littering Behavior Using Deep Learning for a Sustainable Environment**  
+  https://www.researchgate.net/publication/388326795_Real_time_detection_and_monitoring_of_public_littering_behavior_using_deep_learning_for_a_sustainable_environment  
+
+• **Real-Time Litter Detection System Using Deep Learning Techniques**  
+  IRE Journals  
+  https://www.irejournals.com/formatedpaper/1712601.pdf  
+
+• **Intelligent Garbage Detection and Alert System**  
+  SAMVAKTI Journals  
+  https://www.samvaktijournals.com/system/files/sjrit/2021.02.19/intelligent_garbage_detection_and_alert_system.pdf  
+
+• **AI-Based Camera Systems for Roadside Litter Detection and Offender Identification**  
+  IJERT  
+  https://www.ijert.org/ai-based-camera-systems-for-roadsidel-itter-detection-and-offender-identification-ijertv15is010642  
+
+These studies validate the feasibility of AI-driven litter surveillance and helped shape the 
+architecture, detection logic, and system workflow used in this project.  
 
 # 📜 License
 
-MIT License — Free for research & academic use.
+**MIT License** — Free for research & academic use.
 
 
 # ⭐ Final Note
