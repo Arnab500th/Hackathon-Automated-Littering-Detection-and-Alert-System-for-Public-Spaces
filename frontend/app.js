@@ -63,23 +63,39 @@ async function apiFetch(path) {
 // ── Load stats ────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const data = await apiFetch('/stats');
+    // today: drives the dashboard stat cards (today-only counts)
+    // allTime: drives the sidebar totals, pie chart, and toast detection
+    const [today, allTime] = await Promise.all([
+      apiFetch('/stats/today'),
+      apiFetch('/stats'),
+    ]);
     setConnected(true);
 
-    document.getElementById('stat-total').textContent = data.total_incidents ?? '0';
-    document.getElementById('stat-total-trash').textContent = data.total_trash ?? '0';
-    document.getElementById('stat-persons').textContent = data.person_offenders ?? '0';
-    document.getElementById('stat-vehicles').textContent = data.vehicle_offenders ?? '0';
+    // ── Dashboard cards — today's figures only ────────────────
+    document.getElementById('stat-total').textContent       = today.total_incidents  ?? '0';
+    document.getElementById('stat-total-trash').textContent = today.total_trash      ?? '0';
+    document.getElementById('stat-persons').textContent     = today.person_offenders ?? '0';
+    document.getElementById('stat-vehicles').textContent    = today.vehicle_offenders ?? '0';
 
-    document.getElementById('sb-total').textContent = data.total_incidents ?? '0';
-    document.getElementById('sb-persons').textContent = data.person_offenders ?? '0';
-    document.getElementById('sb-vehicles').textContent = data.vehicle_offenders ?? '0';
+    // Optional sub-labels: show the date so it's unambiguous
+    const dateLabel = today.date ?? 'today';
+    ['stat-total-sub','stat-trash-sub','stat-persons-sub','stat-vehicles-sub']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = dateLabel;
+      });
 
-    updatePieChart(data.by_trash_type || {});
+    // ── Sidebar — all-time totals ─────────────────────────────
+    document.getElementById('sb-total').textContent    = allTime.total_incidents  ?? '0';
+    document.getElementById('sb-persons').textContent  = allTime.person_offenders ?? '0';
+    document.getElementById('sb-vehicles').textContent = allTime.vehicle_offenders ?? '0';
+
+    // ── Pie chart — all-time breakdown by trash type ──────────
+    updatePieChart(allTime.by_trash_type || {});
     await loadActiveCameras();
 
-    // New incident toast
-    const total = data.total_incidents || 0;
+    // ── Toast — trigger on all-time count change ──────────────
+    const total = allTime.total_incidents || 0;
     if (lastIncidentCount > 0 && total > lastIncidentCount) {
       showToast('⚠ NEW INCIDENT',
         `${total - lastIncidentCount} new litter event(s) detected`);
@@ -371,12 +387,30 @@ async function loadLiveStats() {
           ${c.id}
         </div>
         <div class="cam-stat-body" style="display:flex; gap:16px;">
-          <img src="${API}/stream/${c.id}" style="width:200px; height:120px; object-fit:cover; border:1px solid #3f3f46; border-radius:4px" onerror="this.src=''; this.alt='Stream Offline'"/>
+          <img src="${API}/stream/${c.id}"
+            style="width:200px; height:120px; object-fit:cover; border:1px solid #3f3f46; border-radius:4px"
+            onerror="this.src=''; this.alt='Stream Offline'"/>
           <div style="flex:1">
-            <div style="font-family:var(--font-mono); font-size:12px; color:var(--muted); margin-bottom:8px">Details & Output</div>
-            <div style="font-size:14px; margin-bottom:4px">Last ping: <span style="color:var(--ok)">${fmtTime(c.last_ping)}</span></div>
-            <div style="font-size:14px; margin-bottom:4px">Status: Processing</div>
-            <div style="font-family:var(--font-mono); font-size:11px; margin-top:12px; color:var(--muted)">[Live feeds available in the Stream tab]</div>
+            <div style="font-family:var(--font-mono); font-size:12px; color:var(--muted); margin-bottom:10px">
+              All-time totals for this camera
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:10px;">
+              <div style="background:#18181b; border-radius:6px; padding:8px; text-align:center;">
+                <div style="font-family:var(--font-mono); font-size:20px; color:var(--accent);">${c.total_trash ?? 0}</div>
+                <div style="font-size:10px; color:var(--muted); margin-top:2px;">TRASH SPOTTED</div>
+              </div>
+              <div style="background:#18181b; border-radius:6px; padding:8px; text-align:center;">
+                <div style="font-family:var(--font-mono); font-size:20px; color:var(--ok);">${c.total_persons ?? 0}</div>
+                <div style="font-size:10px; color:var(--muted); margin-top:2px;">PERSON EVENTS</div>
+              </div>
+              <div style="background:#18181b; border-radius:6px; padding:8px; text-align:center;">
+                <div style="font-family:var(--font-mono); font-size:20px; color:#ffaa00;">${c.total_vehicles ?? 0}</div>
+                <div style="font-size:10px; color:var(--muted); margin-top:2px;">VEHICLE EVENTS</div>
+              </div>
+            </div>
+            <div style="font-size:12px; color:var(--muted);">
+              Last ping: <span style="color:var(--ok)">${fmtTime(c.last_ping)}</span>
+            </div>
           </div>
         </div>
       </div>

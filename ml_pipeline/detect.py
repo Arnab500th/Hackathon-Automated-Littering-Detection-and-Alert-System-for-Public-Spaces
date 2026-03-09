@@ -13,12 +13,12 @@ from config import *
 
 # ── Real module imports ───────────────────────────────────────
 try:
-    from ocr_module import read_license_plate_from_frame as read_plate_from_frame
+    from ocr_module import read_license_plate_from_frame
     OCR_AVAILABLE = True
 except ImportError:
     print("[WARN] ocr_module not found - OCR disabled")
     OCR_AVAILABLE = False
-    def read_plate_from_frame(frame, box):
+    def read_license_plate_from_frame(frame, box):
         return None
 
 try:
@@ -75,7 +75,7 @@ class StreamSender:
             with self._lock:
                 frame = self._frame
             if frame is None or frame is last_sent:
-                time.sleep(0.01)  # ~30fps max
+                time.sleep(0.001)  # ~30fps max
                 continue
             last_sent = frame
             try:
@@ -361,7 +361,7 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
                     frame, snap_box, snap_type, state_info.get("label", "trash")
                 )
                 if snap_type == "vehicle" and OCR_AVAILABLE:
-                    plate = read_plate_from_frame(frame, snap_box)
+                    plate = read_license_plate_from_frame(frame, snap_box)
                     if plate:
                         print(f"  Plate:     {plate}")
 

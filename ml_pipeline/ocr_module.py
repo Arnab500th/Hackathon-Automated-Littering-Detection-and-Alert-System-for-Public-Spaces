@@ -5,9 +5,17 @@ import cv2
 import numpy as np
 import easyocr
 
-# Loads on first call, cached after (~10 seconds first time)
-# gpu=False is safe for your setup, set True if you want GPU
-reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+# Lazily initialised on first OCR call — avoids the ~10s startup
+# cost and ~200MB RAM load when no vehicles are ever detected.
+_reader = None
+
+def _get_reader():
+    global _reader
+    if _reader is None:
+        print("[OCR] Initialising EasyOCR reader (first vehicle detected)...")
+        _reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+        print("[OCR] EasyOCR ready.")
+    return _reader
 
 
 def clean_text(text: str) -> str:
@@ -104,7 +112,7 @@ def read_license_plate_from_crop(crop):
 
     try:
         # Returns list of (bbox, text, confidence)
-        results = reader.readtext(
+        results = _get_reader().readtext(
             processed_crop,
             allowlist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
             detail=1
@@ -163,4 +171,3 @@ def read_license_plate_from_frame(frame, vehicle_box):
     y2 = min(h, int(vehicle_box[3]) + padding)
     crop = frame[y1:y2, x1:x2]
     return read_license_plate_from_crop(crop)
-
