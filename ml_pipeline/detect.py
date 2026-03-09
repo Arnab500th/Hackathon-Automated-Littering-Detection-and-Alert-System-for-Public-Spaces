@@ -180,11 +180,13 @@ def boxes_overlap(box_a, box_b):
 
 
 def nearest_suspect(trash_box, persons, vehicles):
-    suspects = [("person", b) for b in persons] + [("vehicle", b) for b in vehicles]
+    # persons  = [(track_id, box), ...]
+    # vehicles = [(track_id, box), ...]
+    suspects = [("person",  pid,  b) for pid, b  in persons] +                [("vehicle", vid,  b) for vid, b  in vehicles]
     if not suspects:
-        return None, None
-    nearest = min(suspects, key=lambda s: get_distance(trash_box, s[1]))
-    return nearest[0], nearest[1]
+        return None, None, None
+    nearest = min(suspects, key=lambda s: get_distance(trash_box, s[2]))
+    return nearest[0], nearest[1], nearest[2]   # type, track_id, box
 
 
 def get_box_center(box):
@@ -206,7 +208,17 @@ def smooth_coords(store, key, new_box, alpha=0.5):
     return result
 
 
-def is_same_person(current_box, owner_last_pos):
+def is_same_person(current_track_id, current_box, owner_track_id, owner_last_pos):
+    """
+    Primary check:  compare ByteTrack IDs — fast and exact.
+    Fallback check: positional distance — used when either ID is None
+                    (ByteTrack hasn't confirmed the track yet, or the person
+                    briefly left the frame and got a new ID on re-entry).
+    """
+    # Both IDs known and valid → use identity directly
+    if current_track_id is not None and owner_track_id is not None:
+        return current_track_id == owner_track_id
+    # At least one ID missing → fall back to position heuristic
     if owner_last_pos is None:
         return False
     cx, cy = get_box_center(current_box)
@@ -255,7 +267,7 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
     if key not in ctx.object_states:
         ctx.object_states[key] = {
             "state": "UNKNOWN", "box": current_box,
-            "owner_box": None, "owner_last_pos": None,
+            "owner_box": None, "owner_last_pos": None, "owner_track_id": None,
             "sep_frame": None, "prev_box": prev_box,
             "label": None, "confidence": 0.0,
             "first_seen": ctx.frame_count,
@@ -265,17 +277,19 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
     state      = state_info["state"]
 
     if state == "UNKNOWN":
-        suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
+        suspect_type, suspect_id, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None:
             dist = get_distance(current_box, suspect_box)
             if dist < CARRY_DISTANCE or boxes_overlap(current_box, suspect_box):
-                state_info["state"]     = "CARRYING"
-                state_info["owner_box"] = suspect_box
+                state_info["state"]          = "CARRYING"
+                state_info["owner_box"]      = suspect_box
+                state_info["owner_track_id"] = suspect_id   # save ByteTrack ID
 
     elif state == "CARRYING":
-        suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
+        suspect_type, suspect_id, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None:
             state_info["owner_box"]      = suspect_box
+            state_info["owner_track_id"] = suspect_id   # keep ID updated each frame
             state_info["owner_last_pos"] = get_box_center(suspect_box)
         if suspect_box is None or get_distance(current_box, suspect_box) > CARRY_DISTANCE:
             state_info["state"]          = "SEPARATION"
@@ -286,9 +300,11 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
             )
 
     elif state == "SEPARATION":
-        suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
+        suspect_type, suspect_id, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None and get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
-            if is_same_person(suspect_box, state_info.get("owner_last_pos")):
+            if is_same_person(suspect_id, suspect_box,
+                              state_info.get("owner_track_id"),
+                              state_info.get("owner_last_pos")):
                 state_info["state"] = "CANCELLED"
                 print("[CANCEL] Owner returned during separation")
                 return None
@@ -303,9 +319,11 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
             print(f"[STATE] Object STATIONARY after {frames_separated} frames")
 
     elif state == "STATIONARY":
-        suspect_type, suspect_box = nearest_suspect(current_box, persons, vehicles)
+        suspect_type, suspect_id, suspect_box = nearest_suspect(current_box, persons, vehicles)
         if suspect_box is not None and get_distance(current_box, suspect_box) < CANCEL_DISTANCE:
-            if is_same_person(suspect_box, state_info.get("owner_last_pos")):
+            if is_same_person(suspect_id, suspect_box,
+                              state_info.get("owner_track_id"),
+                              state_info.get("owner_last_pos")):
                 state_info["state"] = "CANCELLED"
                 print("[CANCEL] Owner returned to object")
                 return None
@@ -511,21 +529,29 @@ def camera_worker(cam_config, frame_queues, stop_event):
             persons  = []
             vehicles = []
 
-            person_detection = person_model(frame, verbose=False)[0]
+            person_detection = person_model.track(
+                frame, persist=True, tracker="bytetrack.yaml", verbose=False
+            )[0]
             for box in person_detection.boxes:
                 cls    = int(box.cls[0])
                 conf   = float(box.conf[0])
                 coords = box.xyxy[0].tolist()
+                # ByteTrack assigns IDs after the first frame a track is confirmed.
+                # box.id is None on the very first frame of a new detection.
+                pid = int(box.id[0]) if box.id is not None else None
                 if cls == 0 and conf > PERSON_CONF:
                     pkey   = get_grid_key(coords)
                     smooth = smooth_coords(ctx.smoothed_persons, pkey, coords)
-                    label  = f"Person {conf:.2f}"
-                    persons.append(coords)
+                    id_str = f"#{pid}" if pid is not None else ""
+                    label  = f"Person{id_str} {conf:.2f}"
+                    persons.append((pid, coords))          # (track_id, box)
                     draw_rect(frame, smooth, label, (0, 255, 0))
                     ctx.last_drawn_persons.append((smooth, label))
                 elif cls in VEHICLE_CLASSES and conf > PERSON_CONF:
-                    label = f"Vehicle {conf:.2f}"
-                    vehicles.append(coords)
+                    vid_id = int(box.id[0]) if box.id is not None else None
+                    id_str = f"#{vid_id}" if vid_id is not None else ""
+                    label  = f"Vehicle{id_str} {conf:.2f}"
+                    vehicles.append((vid_id, coords))      # (track_id, box)
                     draw_rect(frame, coords, label, (0, 165, 255))
                     ctx.last_drawn_vehicles.append((coords, label))
             ctx.last_known_persons  = persons
