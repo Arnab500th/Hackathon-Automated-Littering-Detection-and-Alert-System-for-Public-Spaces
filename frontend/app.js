@@ -82,12 +82,13 @@ async function loadStats() {
       .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = dateLabel; });
 
     // Sidebar totals — all-time
+    document.getElementById('sb-trash').textContent    = allTime.total_trash       ?? '0';
     document.getElementById('sb-total').textContent    = allTime.total_incidents   ?? '0';
     document.getElementById('sb-persons').textContent  = allTime.person_offenders  ?? '0';
     document.getElementById('sb-vehicles').textContent = allTime.vehicle_offenders ?? '0';
 
     // Pie chart — all-time breakdown by trash type
-    updatePieChart(allTime.by_trash_type || {});
+    updatePieChart(today.by_trash_type || {});
     await loadActiveCameras();
 
     // Toast triggered by all-time count change

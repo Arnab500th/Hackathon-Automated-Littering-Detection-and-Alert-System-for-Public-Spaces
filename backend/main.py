@@ -222,34 +222,40 @@ def get_cameras_config():
 
 
 # ── MJPEG Stream Endpoints ─────────────────────────────────────
-latest_frames = {}
-frame_locks = collections.defaultdict(threading.Lock)
-camera_last_active = {}  # Tracks the last ping time of each camera
+# Store raw JPEG bytes directly — no re-encode on the way out.
+# Each camera gets an asyncio.Event so the generator wakes up
+# immediately when a new frame arrives instead of polling every 33ms.
+latest_frames: dict[str, bytes] = {}          # camera_id -> raw JPEG bytes
+frame_events:  dict[str, asyncio.Event] = {}  # camera_id -> new-frame signal
+camera_last_active = {}                        # camera_id -> datetime
+
+def _get_event(camera_id: str) -> asyncio.Event:
+    if camera_id not in frame_events:
+        frame_events[camera_id] = asyncio.Event()
+    return frame_events[camera_id]
 
 async def get_frame_generator(camera_id: str):
-    last_frame = None
     try:
         while not shutdown_event.is_set():
-            lock = frame_locks[camera_id]
-            with lock:
-                frame = latest_frames.get(camera_id)
+            event = _get_event(camera_id)
+            try:
+                # Wait up to 5s for a new frame — wakes instantly when one arrives
+                await asyncio.wait_for(asyncio.shield(event.wait()), timeout=5.0)
+            except asyncio.TimeoutError:
+                continue  # no frame yet — loop and wait again
 
-            if frame is None or frame is last_frame:
-                await asyncio.sleep(0.03)  # yield control, ~33ms
+            # Grab the current JPEG bytes and immediately clear the event
+            # so the next frame will trigger a fresh wake-up
+            jpeg_bytes = latest_frames.get(camera_id)
+            event.clear()
+
+            if jpeg_bytes is None:
                 continue
 
-            last_frame = frame
-
-            loop = asyncio.get_event_loop()
-            _, jpeg = await loop.run_in_executor(
-                None,
-                lambda f=frame: cv2.imencode('.jpg', f, [cv2.IMWRITE_JPEG_QUALITY, 60]),
-            )
-            frame_bytes = jpeg.tobytes()
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
     except GeneratorExit:
-        pass  # Client disconnected or server shut down — clean exit
+        pass  # Client disconnected — clean exit
 
 @app.get("/stream/{camera_id}")
 async def video_stream(camera_id: str):
@@ -260,18 +266,19 @@ async def video_stream(camera_id: str):
 
 @app.post("/frame/{camera_id}")
 async def receive_frame(camera_id: str, request: Request):
-    """detect.py posts current frame here"""
-    body = await request.body()
-    nparr = np.frombuffer(body, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
-    lock = frame_locks[camera_id]
-    with lock:
-        latest_frames[camera_id] = frame
-    
-    # Update last active time for this camera
+    """
+    detect.py POSTs a JPEG-encoded frame here.
+    We store the raw bytes directly — no decode/re-encode needed.
+    The asyncio.Event wakes all browser clients for this camera instantly.
+    """
+    jpeg_bytes = await request.body()
+    latest_frames[camera_id] = jpeg_bytes
     camera_last_active[camera_id] = datetime.now()
-        
+
+    # Signal all waiting stream generators that a new frame is ready
+    event = _get_event(camera_id)
+    event.set()
+
     return {"status": "ok"}
 
 @app.get("/cameras/active")

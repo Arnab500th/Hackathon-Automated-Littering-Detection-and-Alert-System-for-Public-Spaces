@@ -75,20 +75,32 @@ class StreamSender:
             with self._lock:
                 frame = self._frame
             if frame is None or frame is last_sent:
-                time.sleep(0.001)  # ~30fps max
+                time.sleep(0.005)
                 continue
             last_sent = frame
             try:
-                _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 40])
+                # Resize to 854x480 (or scale to 480p) before encoding —
+                # keeps POST payload small without losing useful detail on
+                # the dashboard stream.
+                h, w = frame.shape[:2]
+                if h > 480:
+                    scale        = 480 / h
+                    stream_frame = cv2.resize(frame, (int(w * scale), 480),
+                                              interpolation=cv2.INTER_LINEAR)
+                else:
+                    stream_frame = frame
+                # Encode once here — main.py stores raw JPEG bytes and
+                # forwards directly to the browser (no second encode).
+                _, jpeg = cv2.imencode(".jpg", stream_frame,
+                                       [cv2.IMWRITE_JPEG_QUALITY, 60])
                 requests.post(
                     f"{BACKEND_URL}/frame/{self.camera_id}",
                     data=jpeg.tobytes(),
                     headers={"Content-Type": "application/octet-stream"},
-                    timeout=1.0,
+                    timeout=0.5,
                 )
             except Exception:
-                pass  
-            time.sleep(0.033)  # enforce ~30fps ceiling
+                pass
 
     def push_frame(self, frame):
         with self._lock:
@@ -622,7 +634,7 @@ def main():
             print("[TRACE] All streams ended.")
             break
 
-        time.sleep(0.001)  # avoid burning CPU in the loop
+          # avoid burning CPU in the loop
 
     # Signal stop and wait for clean shutdown
     stop_event.set()

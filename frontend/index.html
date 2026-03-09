@@ -64,6 +64,8 @@
     </div>
 
     <div class="sidebar-stats" id="sidebar-stats">
+      <p>All-Time Stats</p>
+      <div class="sidebar-stat"><span>Total Trash</span><span id="sb-trash">—</span></div>
       <div class="sidebar-stat"><span>Total Events</span><span id="sb-total">—</span></div>
       <div class="sidebar-stat"><span>Persons</span><span id="sb-persons">—</span></div>
       <div class="sidebar-stat"><span>Vehicles</span><span id="sb-vehicles">—</span></div>
@@ -124,7 +126,7 @@
         <div class="right-col">
           <div class="panel">
             <div class="panel-header">
-              <span class="panel-title">Trash Types</span>
+              <span class="panel-title">Trash Types <span style="font-size:10px;color:var(--muted);font-weight:normal;">— today</span></span>
             </div>
             <div style="position: relative; height: 200px; width: 100%;">
               <canvas id="trashPieChart"></canvas>
