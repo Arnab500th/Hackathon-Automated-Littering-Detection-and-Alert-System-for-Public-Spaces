@@ -135,7 +135,6 @@ class CameraContext:
         self.last_known_persons   = []
         self.last_known_vehicles  = []
         self.current_trash_counts = {}
-        self.current_zone_counts  = {}
         # Per‑batch aggregated counts for new, unique trash objects
         self.max_trash_in_batch   = {}
         # Track IDs we have already logged to the backend (avoid double-counting)
@@ -147,31 +146,12 @@ class CameraContext:
         self.prev_time            = 0.0
 
 
-# ── Zone config ───────────────────────────────────────────────
-ZONE_COLS  = 3
-ZONE_ROWS  = 2
-ZONE_NAMES = {
-    (0, 0): "Top-Left",  (0, 1): "Top-Center",  (0, 2): "Top-Right",
-    (1, 0): "Bot-Left",  (1, 1): "Bot-Center",   (1, 2): "Bot-Right",
-}
-
 
 # ── Helper functions ──────────────────────────────────────────
 def get_grid_key(box):
     cx = (box[0] + box[2]) // 2
     cy = (box[1] + box[3]) // 2
     return (int(cx) // 50, int(cy) // 50)
-
-
-def get_zone(frame, box):
-    h, w = frame.shape[:2]
-    if w == 0 or h == 0:
-        return "Unknown"
-    cx  = (box[0] + box[2]) / 2
-    cy  = (box[1] + box[3]) / 2
-    col = min(int((cx / w) * ZONE_COLS), ZONE_COLS - 1)
-    row = min(int((cy / h) * ZONE_ROWS), ZONE_ROWS - 1)
-    return ZONE_NAMES.get((row, col), f"Z{row}{col}")
 
 
 def get_distance(box_a, box_b):
@@ -246,21 +226,6 @@ def draw_rect(frame, box, label, color):
     (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
     cv2.rectangle(frame, (x1, y1 - th - 8), (x1 + tw, y1), color, -1)
     cv2.putText(frame, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-
-
-def draw_zone_grid(ctx, frame):
-    h, w  = frame.shape[:2]
-    col_w = w // ZONE_COLS;  row_h = h // ZONE_ROWS
-    for c in range(1, ZONE_COLS):
-        cv2.line(frame, (c * col_w, 0), (c * col_w, h), (50, 50, 50), 1)
-    for r in range(1, ZONE_ROWS):
-        cv2.line(frame, (0, r * row_h), (w, r * row_h), (50, 50, 50), 1)
-    for (row, col), name in ZONE_NAMES.items():
-        tx    = col * col_w + 5;  ty = row * row_h + 18
-        count = ctx.current_zone_counts.get(name, 0)
-        color = (0, 0, 200) if count > 2 else (80, 80, 80)
-        cv2.putText(frame, f"{name}:{count}", (tx, ty),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
 
 
 STATE_COLORS = {
@@ -342,12 +307,10 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
         if person_gone:
             frames_on_ground  = ctx.frame_count - state_info.get("sep_frame", ctx.frame_count)
             seconds_on_ground = round(frames_on_ground / 30, 1)
-            zone              = get_zone(frame, current_box)
 
             print(f"\n{'='*45}")
             print(f"  LITTER EVENT CONFIRMED  [{ctx.camera_id}]")
             print(f"  Label:     {state_info.get('label', 'Unknown')}")
-            print(f"  Zone:      {zone}")
             print(f"  On ground: {seconds_on_ground}s")
             print(f"  Time:      {datetime.now().strftime('%H:%M:%S')}")
             print(f"{'='*45}")
@@ -375,7 +338,6 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
                 "camera_id":       ctx.camera_id,
                 "license_plate":   plate,
                 "confidence":      state_info.get("confidence", 0.0),
-                "zone":            zone,
                 "dwell_seconds":   seconds_on_ground,
             }
 
@@ -417,8 +379,7 @@ def run_trash_detection(ctx, frame, persons, vehicles, trash_model):
 
     trash_boxes = [];  trash_labels = [];  trash_ids = []
     ctx.last_drawn_trash  = []
-    trash_type_counts = {};  zone_counts = {}
-    # Per-frame: how many *new* unique track IDs we saw per trash label
+    trash_type_counts = {}
     new_trash_counts = {}
 
     for box in trash_detection.boxes:
@@ -429,8 +390,6 @@ def run_trash_detection(ctx, frame, persons, vehicles, trash_model):
             continue
 
         trash_type_counts[label] = trash_type_counts.get(label, 0) + 1
-        zone = get_zone(frame, coords)
-        zone_counts[zone] = zone_counts.get(zone, 0) + 1
 
         track_id = int(box.id[0]) if box.id is not None else None
         key      = track_id if track_id is not None else get_grid_key(coords)
@@ -458,13 +417,12 @@ def run_trash_detection(ctx, frame, persons, vehicles, trash_model):
         ctx.last_drawn_trash.append((smooth, disp_label, color))
 
     ctx.current_trash_counts     = trash_type_counts
-    ctx.current_zone_counts      = zone_counts
     ctx.latest_new_trash_counts  = new_trash_counts
     events = detect_litter(ctx, trash_boxes, trash_labels, trash_ids, persons, vehicles, frame)
-    return events, trash_type_counts, zone_counts
+    return events, trash_type_counts
 
 
-def draw_hud(ctx, frame, fps, persons, vehicles, events, trash_type_counts, zone_counts):
+def draw_hud(ctx, frame, fps, persons, vehicles, events, trash_type_counts):
     if events:
         cv2.rectangle(frame, (0, 0), (frame.shape[1]-1, frame.shape[0]-1), (0, 0, 255), 10)
         cv2.putText(frame, "LITTER CONFIRMED",
@@ -492,13 +450,6 @@ def draw_hud(ctx, frame, fps, persons, vehicles, events, trash_type_counts, zone
     for trash_type, count in sorted(trash_type_counts.items()):
         cv2.putText(frame, f"  {trash_type}: {count}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
         y += 15
-
-    if zone_counts:
-        hotspot = max(zone_counts, key=zone_counts.get)
-        if zone_counts[hotspot] > 0:
-            y += 8
-            cv2.putText(frame, f"HOTSPOT: {hotspot} ({zone_counts[hotspot]})",
-                        (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 100, 255), 1)
 
 
 # ── Per-camera worker thread ──────────────────────────────────
@@ -577,7 +528,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
             vehicles = ctx.last_known_vehicles
 
         # ── Trash detection + state machine ───────────────────
-        events, trash_counts, zone_counts = run_trash_detection(
+        events, trash_counts = run_trash_detection(
             ctx, frame, persons, vehicles, trash_model
         )
 
@@ -600,8 +551,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
             ctx.last_batch_time    = curr_time
 
         # ── Overlay ───────────────────────────────────────────
-        draw_zone_grid(ctx, frame)
-        draw_hud(ctx, frame, fps, persons, vehicles, events, trash_counts, zone_counts)
+        draw_hud(ctx, frame, fps, persons, vehicles, events, trash_counts)
 
         # ── Push annotated frame to MJPEG backend stream ──────
         stream_sender.push_frame(frame)

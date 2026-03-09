@@ -153,36 +153,36 @@ async def post_trash_logs(request: Request, db: Session = Depends(get_db)):
 @app.get("/stats/history")
 def get_stats_history(db: Session = Depends(get_db)):
     """Returns total incidents and total trash per day for the last 7 days."""
+    from sqlalchemy import text
     seven_days_ago = datetime.now() - timedelta(days=7)
-    
-    # Daily Incidents
-    incidents_daily = db.query(
-        cast(DBMS.LitterIncident.timestamp, Date).label('date'),
-        func.count(DBMS.LitterIncident.id).label('count')
-    ).filter(DBMS.LitterIncident.timestamp >= seven_days_ago)\
-     .group_by(cast(DBMS.LitterIncident.timestamp, Date)).all()
 
-    # Daily Trash
-    trash_daily = db.query(
-        cast(DBMS.TrashLog.timestamp, Date).label('date'),
-        func.count(DBMS.TrashLog.id).label('count')
-    ).filter(DBMS.TrashLog.timestamp >= seven_days_ago)\
-     .group_by(cast(DBMS.TrashLog.timestamp, Date)).all()
+    dates = [
+        (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+        for i in range(6, -1, -1)
+    ]
 
-    # Format perfectly for Chart.js
-    dates = []
-    # Build a list of the last 7 days as strings YYYY-MM-DD
-    for i in range(6, -1, -1):
-        d = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-        dates.append(d)
+    # cast(timestamp, Date) is broken in SQLite — use strftime instead
+    incidents_raw = db.execute(text("""
+        SELECT strftime('%Y-%m-%d', timestamp) AS day, COUNT(id) AS cnt
+        FROM incidents
+        WHERE timestamp >= :since
+        GROUP BY day
+    """), {"since": seven_days_ago.isoformat()}).fetchall()
 
-    incidents_dict = {str(row.date): row.count for row in incidents_daily}
-    trash_dict = {str(row.date): row.count for row in trash_daily}
+    trash_raw = db.execute(text("""
+        SELECT strftime('%Y-%m-%d', timestamp) AS day, COUNT(id) AS cnt
+        FROM trash_log
+        WHERE timestamp >= :since
+        GROUP BY day
+    """), {"since": seven_days_ago.isoformat()}).fetchall()
+
+    incidents_dict = {row[0]: row[1] for row in incidents_raw}
+    trash_dict     = {row[0]: row[1] for row in trash_raw}
 
     return {
-        "labels": dates,
+        "labels":    dates,
         "incidents": [incidents_dict.get(d, 0) for d in dates],
-        "trash": [trash_dict.get(d, 0) for d in dates]
+        "trash":     [trash_dict.get(d, 0)     for d in dates],
     }
 
 
@@ -308,6 +308,80 @@ def get_active_cameras(db: Session = Depends(get_db)):
             })
 
     return {"cameras": active_cams}
+
+@app.get("/stats/camera/{cam_id}")
+def get_camera_stats(cam_id: str, db: Session = Depends(get_db)):
+    """
+    Returns all-time AND today-only stats for a single camera.
+    Used by the Live Stats tab to populate per-camera detail cards.
+    """
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # ── All-time ──────────────────────────────────────────────
+    all_trash     = db.query(DBMS.TrashLog).filter(DBMS.TrashLog.camera_id == cam_id).count()
+    all_persons   = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.camera_id == cam_id,
+        DBMS.LitterIncident.offender_type == "person"
+    ).count()
+    all_vehicles  = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.camera_id == cam_id,
+        DBMS.LitterIncident.offender_type == "vehicle"
+    ).count()
+    all_incidents = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.camera_id == cam_id
+    ).count()
+    by_type_all   = db.query(
+        DBMS.LitterIncident.trash_type,
+        func.count(DBMS.LitterIncident.id)
+    ).filter(DBMS.LitterIncident.camera_id == cam_id)\
+     .group_by(DBMS.LitterIncident.trash_type).all()
+
+    # ── Today only ────────────────────────────────────────────
+    today_trash     = db.query(DBMS.TrashLog).filter(
+        DBMS.TrashLog.camera_id == cam_id,
+        DBMS.TrashLog.timestamp >= today_start
+    ).count()
+    today_persons   = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.camera_id == cam_id,
+        DBMS.LitterIncident.offender_type == "person",
+        DBMS.LitterIncident.timestamp >= today_start
+    ).count()
+    today_vehicles  = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.camera_id == cam_id,
+        DBMS.LitterIncident.offender_type == "vehicle",
+        DBMS.LitterIncident.timestamp >= today_start
+    ).count()
+    today_incidents = db.query(DBMS.LitterIncident).filter(
+        DBMS.LitterIncident.camera_id == cam_id,
+        DBMS.LitterIncident.timestamp >= today_start
+    ).count()
+    by_type_today   = db.query(
+        DBMS.LitterIncident.trash_type,
+        func.count(DBMS.LitterIncident.id)
+    ).filter(
+        DBMS.LitterIncident.camera_id == cam_id,
+        DBMS.LitterIncident.timestamp >= today_start
+    ).group_by(DBMS.LitterIncident.trash_type).all()
+
+    return {
+        "camera_id": cam_id,
+        "date":      today_start.strftime('%Y-%m-%d'),
+        "all_time": {
+            "total_trash":     all_trash,
+            "total_persons":   all_persons,
+            "total_vehicles":  all_vehicles,
+            "total_incidents": all_incidents,
+            "by_trash_type":   {t: c for t, c in by_type_all},
+        },
+        "today": {
+            "total_trash":     today_trash,
+            "total_persons":   today_persons,
+            "total_vehicles":  today_vehicles,
+            "total_incidents": today_incidents,
+            "by_trash_type":   {t: c for t, c in by_type_today},
+        },
+    }
+
 
 # ── Serve Frontend ─────────────────────────────────────────────
 # IMPORTANT: This must be LAST so all API routes take priority.

@@ -63,41 +63,37 @@ async function apiFetch(path) {
 // ── Load stats ────────────────────────────────────────────────
 async function loadStats() {
   try {
-    // today: drives the dashboard stat cards (today-only counts)
-    // allTime: drives the sidebar totals, pie chart, and toast detection
+    // Fetch today + all-time in parallel — no added latency
     const [today, allTime] = await Promise.all([
       apiFetch('/stats/today'),
       apiFetch('/stats'),
     ]);
     setConnected(true);
 
-    // ── Dashboard cards — today's figures only ────────────────
-    document.getElementById('stat-total').textContent       = today.total_incidents  ?? '0';
-    document.getElementById('stat-total-trash').textContent = today.total_trash      ?? '0';
-    document.getElementById('stat-persons').textContent     = today.person_offenders ?? '0';
+    // Dashboard stat cards — today's figures only
+    document.getElementById('stat-total').textContent       = today.total_incidents   ?? '0';
+    document.getElementById('stat-total-trash').textContent = today.total_trash       ?? '0';
+    document.getElementById('stat-persons').textContent     = today.person_offenders  ?? '0';
     document.getElementById('stat-vehicles').textContent    = today.vehicle_offenders ?? '0';
 
-    // Optional sub-labels: show the date so it's unambiguous
+    // Sub-labels show the actual date for clarity
     const dateLabel = today.date ?? 'today';
     ['stat-total-sub','stat-trash-sub','stat-persons-sub','stat-vehicles-sub']
-      .forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = dateLabel;
-      });
+      .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = dateLabel; });
 
-    // ── Sidebar — all-time totals ─────────────────────────────
-    document.getElementById('sb-total').textContent    = allTime.total_incidents  ?? '0';
-    document.getElementById('sb-persons').textContent  = allTime.person_offenders ?? '0';
+    // Sidebar totals — all-time
+    document.getElementById('sb-total').textContent    = allTime.total_incidents   ?? '0';
+    document.getElementById('sb-persons').textContent  = allTime.person_offenders  ?? '0';
     document.getElementById('sb-vehicles').textContent = allTime.vehicle_offenders ?? '0';
 
-    // ── Pie chart — all-time breakdown by trash type ──────────
+    // Pie chart — all-time breakdown by trash type
     updatePieChart(allTime.by_trash_type || {});
     await loadActiveCameras();
 
-    // ── Toast — trigger on all-time count change ──────────────
+    // Toast triggered by all-time count change
     const total = allTime.total_incidents || 0;
     if (lastIncidentCount > 0 && total > lastIncidentCount) {
-      showToast('⚠ NEW INCIDENT',
+      showToast('NEW INCIDENT',
         `${total - lastIncidentCount} new litter event(s) detected`);
       loadRecentIncidents();
       loadHistory();
@@ -369,6 +365,8 @@ function updatePieChart(byType) {
 }
 
 // ── Live Stats Tab ────────────────────────────────────────────
+// Fetches /cameras/active to get the list, then calls
+// /stats/camera/{id} for each camera to get today + all-time breakdowns.
 async function loadLiveStats() {
   try {
     const data = await apiFetch('/cameras/active');
@@ -380,45 +378,101 @@ async function loadLiveStats() {
       return;
     }
 
+    // Show skeleton cards while per-camera data loads
     container.innerHTML = cams.map(c => `
-      <div class="panel cam-stat-card">
+      <div class="panel cam-stat-card" id="cam-card-${c.id}">
         <div class="cam-stat-header">
           <span class="live-dot" style="background:var(--ok)"></span>
           ${c.id}
+          <span style="font-size:11px; color:var(--muted); margin-left:8px;">Last ping: ${fmtTime(c.last_ping)}</span>
         </div>
-        <div class="cam-stat-body" style="display:flex; gap:16px;">
-          <img src="${API}/stream/${c.id}"
-            style="width:200px; height:120px; object-fit:cover; border:1px solid #3f3f46; border-radius:4px"
-            onerror="this.src=''; this.alt='Stream Offline'"/>
-          <div style="flex:1">
-            <div style="font-family:var(--font-mono); font-size:12px; color:var(--muted); margin-bottom:10px">
-              All-time totals for this camera
-            </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:10px;">
-              <div style="background:#18181b; border-radius:6px; padding:8px; text-align:center;">
-                <div style="font-family:var(--font-mono); font-size:20px; color:var(--accent);">${c.total_trash ?? 0}</div>
-                <div style="font-size:10px; color:var(--muted); margin-top:2px;">TRASH SPOTTED</div>
-              </div>
-              <div style="background:#18181b; border-radius:6px; padding:8px; text-align:center;">
-                <div style="font-family:var(--font-mono); font-size:20px; color:var(--ok);">${c.total_persons ?? 0}</div>
-                <div style="font-size:10px; color:var(--muted); margin-top:2px;">PERSON EVENTS</div>
-              </div>
-              <div style="background:#18181b; border-radius:6px; padding:8px; text-align:center;">
-                <div style="font-family:var(--font-mono); font-size:20px; color:#ffaa00;">${c.total_vehicles ?? 0}</div>
-                <div style="font-size:10px; color:var(--muted); margin-top:2px;">VEHICLE EVENTS</div>
-              </div>
-            </div>
-            <div style="font-size:12px; color:var(--muted);">
-              Last ping: <span style="color:var(--ok)">${fmtTime(c.last_ping)}</span>
-            </div>
-          </div>
-        </div>
+        <div style="color:var(--muted); font-size:12px; padding:12px 0;">Loading camera stats...</div>
       </div>
     `).join('');
 
+    // Fetch all cameras in parallel, then fill each card
+    const statResults = await Promise.allSettled(
+      cams.map(c => apiFetch(`/stats/camera/${c.id}`))
+    );
+
+    statResults.forEach((result, i) => {
+      const cam   = cams[i];
+      const card  = document.getElementById(`cam-card-${cam.id}`);
+      if (!card) return;
+
+      if (result.status === 'rejected') {
+        card.innerHTML += `<div style="color:var(--warn);font-size:12px;">Failed to load stats for ${cam.id}</div>`;
+        return;
+      }
+
+      const s = result.value;
+      const t = s.today;
+      const a = s.all_time;
+
+      // Build trash-type rows (today)
+      const todayTypes = Object.entries(t.by_trash_type || {});
+      const trashRows = todayTypes.length
+        ? todayTypes.map(([type, cnt]) =>
+            `<span style="background:#27272a;border-radius:4px;padding:2px 7px;font-size:11px;font-family:var(--font-mono);">${type}: <b style="color:var(--accent)">${cnt}</b></span>`
+          ).join(' ')
+        : '<span style="color:var(--muted);font-size:11px;">No trash detected today</span>';
+
+      card.innerHTML = `
+        <div class="cam-stat-header" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span class="live-dot" style="background:var(--ok)"></span>
+          <span style="font-family:var(--font-mono);font-size:14px;">${cam.id}</span>
+          <span style="font-size:11px;color:var(--muted);">Last ping: ${fmtTime(cam.last_ping)}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:auto;">Date: ${s.date}</span>
+        </div>
+        <div class="cam-stat-body" style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;">
+
+          <!-- Stream thumbnail -->
+          <img src="${API}/stream/${cam.id}"
+            style="width:210px;height:126px;object-fit:cover;border:1px solid #3f3f46;border-radius:6px;flex-shrink:0;"
+            onerror="this.outerHTML='<div style=width:210px;height:126px;display:flex;align-items:center;justify-content:center;border:1px solid #3f3f46;border-radius:6px;color:var(--muted);font-size:12px;>NO SIGNAL</div>'"/>
+
+          <!-- Stats -->
+          <div style="flex:1;min-width:260px;">
+
+            <!-- TODAY row -->
+            <div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:1px;margin-bottom:6px;">Today — ${s.date}</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px;">
+              ${statBox(t.total_incidents,  'INCIDENTS',  'var(--warn)')}
+              ${statBox(t.total_trash,      'TRASH',      'var(--accent)')}
+              ${statBox(t.total_persons,    'PERSONS',    'var(--ok)')}
+              ${statBox(t.total_vehicles,   'VEHICLES',   '#ffaa00')}
+            </div>
+
+            <!-- ALL-TIME row -->
+            <div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:1px;margin-bottom:6px;">All-time</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px;">
+              ${statBox(a.total_incidents,  'INCIDENTS',  'var(--warn)',  true)}
+              ${statBox(a.total_trash,      'TRASH',      'var(--accent)', true)}
+              ${statBox(a.total_persons,    'PERSONS',    'var(--ok)',    true)}
+              ${statBox(a.total_vehicles,   'VEHICLES',   '#ffaa00',     true)}
+            </div>
+
+            <!-- Trash types seen today -->
+            <div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:1px;margin-bottom:6px;">Trash types today</div>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;">${trashRows}</div>
+          </div>
+        </div>
+      `;
+    });
+
   } catch (e) {
-    console.error(e);
+    console.error('[loadLiveStats]', e);
   }
+}
+
+// Helper: renders a single mini stat box
+function statBox(value, label, color, dim = false) {
+  const opacity = dim ? 'opacity:0.65;' : '';
+  return `
+    <div style="background:#18181b;border-radius:6px;padding:8px 4px;text-align:center;${opacity}">
+      <div style="font-family:var(--font-mono);font-size:18px;color:${color};">${value ?? 0}</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px;letter-spacing:0.5px;">${label}</div>
+    </div>`;
 }
 
 // ── Multi-camera stream ───────────────────────────────────────
