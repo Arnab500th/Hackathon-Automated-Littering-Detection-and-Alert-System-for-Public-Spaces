@@ -160,6 +160,9 @@ class CameraContext:
         self.last_batch_time      = time.time()
         self.frame_count          = 0
         self.prev_time            = 0.0
+        # Dynamic priority — updated each frame based on recent trash activity
+        self.last_trash_time      = 0.0   # epoch time of last trash detection
+        self.priority             = "LOW"  # current priority level
 
 
 
@@ -454,6 +457,12 @@ def run_trash_detection(ctx, frame, persons, vehicles, trash_model):
 
     ctx.current_trash_counts     = trash_type_counts
     ctx.latest_new_trash_counts  = new_trash_counts
+
+    # Update last_trash_time if any trash was detected this frame —
+    # this is what drives the priority system in get_camera_skip()
+    if trash_boxes:
+        ctx.last_trash_time = time.time()
+
     events = detect_litter(ctx, trash_boxes, trash_labels, trash_ids, persons, vehicles, frame)
     return events, trash_type_counts
 
@@ -465,10 +474,14 @@ def draw_hud(ctx, frame, fps, persons, vehicles, events, trash_type_counts):
                     (frame.shape[1]//2 - 170, 65),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 3)
 
+    # Priority colour: HIGH=green, MEDIUM=yellow, LOW=grey
+    priority_color = {"HIGH": (0,255,0), "MEDIUM": (0,200,255), "LOW": (129,133,137)}
+    p_color = priority_color.get(ctx.priority, (129,133,137))
     cv2.putText(frame, f"FPS: {fps:.1f}",            (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-    cv2.putText(frame, f"Persons: {len(persons)}",   (10, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-    cv2.putText(frame, f"Vehicles: {len(vehicles)}", (10, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 1)
-    cv2.putText(frame, f"Trash: {sum(trash_type_counts.values())}", (10, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
+    cv2.putText(frame, f"Priority: {ctx.priority}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, p_color, 2)
+    cv2.putText(frame, f"Persons: {len(persons)}",   (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+    cv2.putText(frame, f"Vehicles: {len(vehicles)}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 1)
+    cv2.putText(frame, f"Trash: {sum(trash_type_counts.values())}", (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
 
     y = 116
     state_counts = {}
@@ -486,6 +499,34 @@ def draw_hud(ctx, frame, fps, persons, vehicles, events, trash_type_counts):
     for trash_type, count in sorted(trash_type_counts.items()):
         cv2.putText(frame, f"  {trash_type}: {count}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
         y += 15
+
+
+# ── Dynamic priority ─────────────────────────────────────────
+def get_camera_skip(ctx) -> int:
+    """
+    Returns the skip_frames value for this camera based on how recently
+    trash was last detected on it.
+
+    HIGH   (trash in last PRIORITY_HIGH_WINDOW seconds)   → PRIORITY_HIGH_SKIP
+    MEDIUM (trash in last PRIORITY_MEDIUM_WINDOW seconds) → PRIORITY_MEDIUM_SKIP
+    LOW    (no trash for longer than PRIORITY_MEDIUM_WINDOW) → PRIORITY_LOW_SKIP
+
+    Only person detection is skipped — trash model runs every frame.
+    Transition HIGH→MEDIUM→LOW is automatic as time passes with no activity.
+    Transition LOW/MEDIUM→HIGH is instant the moment trash appears.
+    """
+    now     = time.time()
+    elapsed = now - ctx.last_trash_time   # seconds since last trash seen
+
+    if elapsed <= PRIORITY_HIGH_WINDOW:
+        ctx.priority = "HIGH"
+        return PRIORITY_HIGH_SKIP
+    elif elapsed <= PRIORITY_MEDIUM_WINDOW:
+        ctx.priority = "MEDIUM"
+        return PRIORITY_MEDIUM_SKIP
+    else:
+        ctx.priority = "LOW"
+        return PRIORITY_LOW_SKIP
 
 
 # ── Per-camera worker thread ──────────────────────────────────
@@ -530,7 +571,10 @@ def camera_worker(cam_config, frame_queues, stop_event):
         ctx.prev_time = curr_time
 
         # ── Person / vehicle detection ─────────────────────────
-        if ctx.frame_count % SKIP_FRAMES == 0:
+        # Dynamic priority: skip_frames adjusts based on recent trash activity.
+        # HIGH (active scene) = every frame. LOW (idle camera) = every 8th frame.
+        current_skip = get_camera_skip(ctx)
+        if ctx.frame_count % current_skip == 0:
             ctx.last_drawn_persons  = []
             ctx.last_drawn_vehicles = []
             persons  = []
@@ -579,13 +623,12 @@ def camera_worker(cam_config, frame_queues, stop_event):
 
         if events:
             for event in events:
-                t = threading.Thread(
+                threading.Thread(
                     target=post_incident,
                     args=(event,),
-                    daemon=False,   # non-daemon so process waits for alert to finish
+                    daemon=True,
                     name=f"IncidentPost-{camera_id}",
-                )
-                t.start()
+                ).start()
 
         # ── Batch trash log ───────────────────────────────────
         # Use only *new* unique objects (first time a track_id is seen)
