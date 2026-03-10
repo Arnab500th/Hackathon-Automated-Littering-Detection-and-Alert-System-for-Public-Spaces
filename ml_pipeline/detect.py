@@ -130,6 +130,23 @@ def post_trash_log(trash_counts, camera_id):
     threading.Thread(target=_send, daemon=True).start()
 
 
+def post_priority(camera_id: str, priority: str):
+    """
+    Fire-and-forget POST to backend so the dashboard can show live priority.
+    Runs in a daemon thread — if it fails, detection is unaffected.
+    """
+    def _send():
+        try:
+            requests.post(
+                f"{BACKEND_URL}/camera/priority/{camera_id}",
+                json={"priority": priority},
+                timeout=0.5,
+            )
+        except Exception:
+            pass
+    threading.Thread(target=_send, daemon=True).start()
+
+
 # ── Folder setup ──────────────────────────────────────────────
 os.makedirs(f"{SNAPSHOT_DIR}/persons",  exist_ok=True)
 os.makedirs(f"{SNAPSHOT_DIR}/vehicles", exist_ok=True)
@@ -582,6 +599,10 @@ def camera_worker(cam_config, frame_queues, stop_event):
         # HIGH (active scene) = every frame. LOW (idle camera) = every 8th frame.
         current_skip = get_camera_skip(ctx)
         current_skip = get_geo_skip(current_skip, ctx.cam_lat, ctx.cam_lng)
+        # Push priority to backend whenever it changes (not every frame — only on transition)
+        if not hasattr(ctx, '_last_posted_priority') or ctx._last_posted_priority != ctx.priority:
+            post_priority(camera_id, ctx.priority)
+            ctx._last_posted_priority = ctx.priority
         if ctx.frame_count % current_skip == 0:
             ctx.last_drawn_persons  = []
             ctx.last_drawn_vehicles = []

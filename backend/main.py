@@ -284,14 +284,32 @@ async def receive_frame(camera_id: str, request: Request):
 @app.get("/cameras/active")
 def get_active_cameras(db: Session = Depends(get_db)):
     """
-    Returns cameras that sent a frame in the last 30 seconds, along with
-    simple per‑camera aggregates pulled from the database:
-      - total_trash:   total TrashLog rows for this camera
-      - total_persons: total incidents with offender_type='person' for this camera
-      - total_vehicles: total incidents with offender_type='vehicle' for this camera
+    Returns cameras active in last 30s with DB aggregates, priority, and zone.
+    priority  — live value stored by POST /camera/priority/{camera_id}
+    zone_name — derived from camera GPS vs HIGH_SENSITIVITY_ZONES in config
     """
     now = datetime.now()
     active_cams = []
+
+    try:
+        try:
+            from ml_pipeline.config import CAMERA_CONFIG
+        except ImportError:
+            from ml_pipeline.config import CAMERA_CONFIG
+        cam_coords = {c["id"]: (c.get("lat", 0.0), c.get("lng", 0.0)) for c in CAMERA_CONFIG}
+    except Exception:
+        cam_coords = {}
+
+    def get_zone(cam_id):
+        try:
+            try:
+                from ml_pipeline.geo import in_high_sensitivity_zone
+            except ImportError:
+                from ml_pipeline.geo import in_high_sensitivity_zone
+            lat, lng = cam_coords.get(cam_id, (0.0, 0.0))
+            return in_high_sensitivity_zone(lat, lng)
+        except Exception:
+            return None
 
     for cam_id, last_time in camera_last_active.items():
         if (now - last_time).total_seconds() <= 30:
@@ -306,15 +324,27 @@ def get_active_cameras(db: Session = Depends(get_db)):
             ).count()
 
             active_cams.append({
-                "id": cam_id,
-                "status": "Active",
-                "last_ping": last_time.isoformat(),
-                "total_trash": total_trash,
-                "total_persons": total_persons,
+                "id":             cam_id,
+                "status":         "Active",
+                "last_ping":      last_time.isoformat(),
+                "total_trash":    total_trash,
+                "total_persons":  total_persons,
                 "total_vehicles": total_vehicles,
+                "priority":       camera_priority.get(cam_id, "LOW"),
+                "zone_name":      get_zone(cam_id),
             })
 
     return {"cameras": active_cams}
+
+
+# detect.py POSTs current priority here so the dashboard reflects it live
+camera_priority: dict[str, str] = {}
+
+@app.post("/camera/priority/{camera_id}")
+async def update_priority(camera_id: str, request: Request):
+    body = await request.json()
+    camera_priority[camera_id] = body.get("priority", "LOW")
+    return {"status": "ok"}
 
 @app.get("/stats/camera/{cam_id}")
 def get_camera_stats(cam_id: str, db: Session = Depends(get_db)):

@@ -122,7 +122,11 @@ async function loadActiveCameras() {
       <div class="cam-item">
         <div class="cam-dot"></div>
         <div class="cam-info">
-          <div class="cam-id">${c.id}</div>
+          <div class="cam-id">
+            ${c.id}
+            <span class="priority-badge priority-${(c.priority||'LOW').toLowerCase()}">${c.priority||'LOW'}</span>
+            ${c.zone_name ? `<span class="zone-badge">${c.zone_name}</span>` : ''}
+          </div>
           <div class="cam-time">pinged ${fmtTime(c.last_ping)}</div>
         </div>
       </div>
@@ -422,6 +426,8 @@ async function loadLiveStats() {
         <div class="cam-stat-header" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <span class="live-dot" style="background:var(--ok)"></span>
           <span style="font-family:var(--font-mono);font-size:14px;">${cam.id}</span>
+          <span class="priority-badge priority-${(cam.priority||'LOW').toLowerCase()}">${cam.priority||'LOW'}</span>
+          ${cam.zone_name ? `<span class="zone-badge">${cam.zone_name}</span>` : '<span style="font-size:10px;color:var(--muted);">Standard Area</span>'}
           <span style="font-size:11px;color:var(--muted);">Last ping: ${fmtTime(cam.last_ping)}</span>
           <span style="font-size:11px;color:var(--muted);margin-left:auto;">Date: ${s.date}</span>
         </div>
