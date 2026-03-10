@@ -3,12 +3,11 @@
 # ── Multi-camera registry ─────────────────────────────────────
 # Add one entry per camera.
 # source: int (webcam index), file path string, or RTSP URL string
-# Run all cameras:   python detect.py
-# Run one camera:    python detect.py --cam 0   (index into this list)
+
 CAMERA_CONFIG = [
-    {"id": "CAM_01", "source": 1,                             "label": "Front Gate"},
+    {"id": "CAM_01", "source": 1,"label": "Front Gate"},
     {"id": "CAM_02", "source": r"data\test_videos\test_vid_12.mp4",  "label": "test"},
-    #{"id": "CAM_03", "source":r"rtsp://192.168.1.3:8080/h264_ulaw.sdp" ,"label": "Back Entrance"},
+    #{"id": "CAM_03", "source":r"rtsp://10.149.9.188:8080/h264_ulaw.sdp" ,"label": "Back Entrance"},
 ]
 
 # ── Detection ─────────────────────────────────────────────────

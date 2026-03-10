@@ -34,6 +34,7 @@ except ImportError:
 # ── Camera selection ──────────────────────────────────────────
 # Run one camera:   python detect.py --cam 0
 # Run all cameras:  python detect.py
+"""
 parser = argparse.ArgumentParser(description="TRACE detection pipeline")
 parser.add_argument(
     "--cam", type=int, default=None,
@@ -49,7 +50,9 @@ if args.cam is not None:
     _ACTIVE_CAMERAS = [CAMERA_CONFIG[args.cam]]
 else:
     _ACTIVE_CAMERAS = CAMERA_CONFIG
+"""
 
+_ACTIVE_CAMERAS = CAMERA_CONFIG
 
 # ── Stream sender (one per camera, fully independent) ─────────
 class StreamSender:
@@ -80,8 +83,7 @@ class StreamSender:
             last_sent = frame
             try:
                 # Resize to 854x480 (or scale to 480p) before encoding —
-                # keeps POST payload small without losing useful detail on
-                # the dashboard stream.
+
                 h, w = frame.shape[:2]
                 if h > 480:
                     scale        = 480 / h
@@ -89,8 +91,8 @@ class StreamSender:
                                               interpolation=cv2.INTER_LINEAR)
                 else:
                     stream_frame = frame
-                # Encode once here — main.py stores raw JPEG bytes and
-                # forwards directly to the browser (no second encode).
+                #encodes into Raw JPEG bytes and forwards it to the backend
+
                 _, jpeg = cv2.imencode(".jpg", stream_frame,
                                        [cv2.IMWRITE_JPEG_QUALITY, 60])
                 requests.post(
@@ -182,7 +184,7 @@ def boxes_overlap(box_a, box_b):
 def nearest_suspect(trash_box, persons, vehicles):
     # persons  = [(track_id, box), ...]
     # vehicles = [(track_id, box), ...]
-    suspects = [("person",  pid,  b) for pid, b  in persons] +                [("vehicle", vid,  b) for vid, b  in vehicles]
+    suspects = [("person",  pid,  b) for pid, b  in persons] + [("vehicle", vid,  b) for vid, b  in vehicles]
     if not suspects:
         return None, None, None
     nearest = min(suspects, key=lambda s: get_distance(trash_box, s[2]))
@@ -491,7 +493,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
     source    = cam_config["source"]
     cam_label = cam_config["label"]
 
-    # Each thread loads its OWN model instances.
+    # Each thread loads its own model instances.
     # Required because ByteTrack persist=True keeps internal state per model object.
     # Sharing one model between threads would corrupt tracking across cameras.
     print(f"[{camera_id}] Loading models...")
@@ -608,9 +610,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
     print(f"[{camera_id}] Stopped. Total frames: {ctx.frame_count}")
 
 
-# ── Main thread: the ONLY place cv2 GUI calls are made ────────
-# OpenCV requires imshow / waitKey / destroyAllWindows to run
-# in the main thread on all platforms, especially Windows.
+# ── Main thread────────
 
 def main():
     if not _ACTIVE_CAMERAS:

@@ -43,12 +43,14 @@ def post_incident(event: dict) -> bool:
         print(f"[API] ✗ Unexpected error: {e}")
         return False
 
-
+#NOTE - these functions were for testing and debugging purposes
+"""
 def get_stats() -> dict:
     try:
         response = requests.get(f"{BACKEND_URL}/stats", timeout=3)
         if response.status_code == 200:
             return response.json()
+          
     except Exception:
         pass
     return {}   # ← was broken by indentation, now correct
@@ -67,3 +69,4 @@ def get_recent_incidents(limit: int = 10) -> list:
         pass
     return []
 
+"""
