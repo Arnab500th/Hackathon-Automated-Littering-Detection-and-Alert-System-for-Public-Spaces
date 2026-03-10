@@ -5,8 +5,8 @@
 # source: int (webcam index), file path string, or RTSP URL string
 
 CAMERA_CONFIG = [
-    {"id": "CAM_01", "source": 1,"label": "Front Gate"},
-    {"id": "CAM_02", "source": r"data\test_videos\test_vid_12.mp4",  "label": "test"},
+    #{"id": "CAM_01", "source": 1,"label": "Front Gate", "Ph_no":"+918597797117"},
+    {"id": "CAM_02", "source": r"data\test_videos\test_vid_12.mp4",  "label": "test","Ph_no":"+919475561298" },
     #{"id": "CAM_03", "source":r"rtsp://10.149.9.188:8080/h264_ulaw.sdp" ,"label": "Back Entrance"},
 ]
 
@@ -36,3 +36,12 @@ BACKEND_URL = "http://localhost:8000"
 
 # ── Timing ────────────────────────────────────────────────────
 BATCH_INTERVAL = 10   # seconds between trash log batch pushes to backend
+
+#batch levelling
+PRIORITY_HIGH_SKIP   = 1    # every frame
+PRIORITY_MEDIUM_SKIP = 5    # every 3rd frame
+PRIORITY_LOW_SKIP    = 8    # every 6th frame
+
+PRIORITY_HIGH_WINDOW   = 5    # seconds — trash this recent = HIGH
+PRIORITY_MEDIUM_WINDOW = 30   # seconds — trash this recent = MEDIUM
+                               # older than 30s = LOW

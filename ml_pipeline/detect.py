@@ -137,8 +137,10 @@ os.makedirs(f"{SNAPSHOT_DIR}/full",     exist_ok=True)
 
 # ── Per-camera state container ────────────────────────────────
 class CameraContext:
-    def __init__(self, camera_id: str):
+    def __init__(self, camera_id: str, cam_label: str = "", cam_phone: str = None):
         self.camera_id            = camera_id
+        self.cam_label            = cam_label
+        self.cam_phone            = cam_phone
         self.tracked_trash        = {}
         self.object_states        = {}
         self.smoothed_boxes       = {}
@@ -368,9 +370,11 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
                 "image_path":      img_path,
                 "full_frame_path": full_path,
                 "camera_id":       ctx.camera_id,
+                "camera_label":    ctx.cam_label,
                 "license_plate":   plate,
                 "confidence":      state_info.get("confidence", 0.0),
                 "dwell_seconds":   seconds_on_ground,
+                "phone_no":        ctx.cam_phone,
             }
 
     state_info["prev_box"] = state_info["box"]
@@ -492,6 +496,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
     camera_id = cam_config["id"]
     source    = cam_config["source"]
     cam_label = cam_config["label"]
+    cam_phone = cam_config.get("Ph_no", None)   # WhatsApp alert number for this camera
 
     # Each thread loads its own model instances.
     # Required because ByteTrack persist=True keeps internal state per model object.
@@ -501,7 +506,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
     trash_model  = YOLO(r"ml_pipeline\weights\taco_8s_v3.pt")
     print(f"[{camera_id}] Models loaded. Starting capture...")
 
-    ctx           = CameraContext(camera_id)
+    ctx           = CameraContext(camera_id, cam_label, cam_phone)
     stream_sender = StreamSender(camera_id)
 
     vid = cv2.VideoCapture(source)
@@ -574,12 +579,13 @@ def camera_worker(cam_config, frame_queues, stop_event):
 
         if events:
             for event in events:
-                threading.Thread(
+                t = threading.Thread(
                     target=post_incident,
                     args=(event,),
-                    daemon=True,
+                    daemon=False,   # non-daemon so process waits for alert to finish
                     name=f"IncidentPost-{camera_id}",
-                ).start()
+                )
+                t.start()
 
         # ── Batch trash log ───────────────────────────────────
         # Use only *new* unique objects (first time a track_id is seen)
