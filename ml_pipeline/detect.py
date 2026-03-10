@@ -10,6 +10,7 @@ from datetime import datetime
 from ultralytics import YOLO
 import uuid
 from config import *
+from geo import get_geo_skip, nearest_office
 
 # ── Real module imports ───────────────────────────────────────
 try:
@@ -137,10 +138,12 @@ os.makedirs(f"{SNAPSHOT_DIR}/full",     exist_ok=True)
 
 # ── Per-camera state container ────────────────────────────────
 class CameraContext:
-    def __init__(self, camera_id: str, cam_label: str = "", cam_phone: str = None):
+    def __init__(self, camera_id: str, cam_label: str = "", cam_phone: str = None, cam_lat: float = 0.0, cam_lng: float = 0.0):
         self.camera_id            = camera_id
         self.cam_label            = cam_label
         self.cam_phone            = cam_phone
+        self.cam_lat              = cam_lat
+        self.cam_lng              = cam_lng
         self.tracked_trash        = {}
         self.object_states        = {}
         self.smoothed_boxes       = {}
@@ -378,6 +381,8 @@ def update_object_state(ctx, key, current_box, prev_box, persons, vehicles, fram
                 "confidence":      state_info.get("confidence", 0.0),
                 "dwell_seconds":   seconds_on_ground,
                 "phone_no":        ctx.cam_phone,
+                "cam_lat":         ctx.cam_lat,
+                "cam_lng":         ctx.cam_lng,
             }
 
     state_info["prev_box"] = state_info["box"]
@@ -537,7 +542,9 @@ def camera_worker(cam_config, frame_queues, stop_event):
     camera_id = cam_config["id"]
     source    = cam_config["source"]
     cam_label = cam_config["label"]
-    cam_phone = cam_config.get("Ph_no", None)   # WhatsApp alert number for this camera
+    cam_phone = cam_config.get("Ph_no", None)   # legacy fallback number
+    cam_lat   = cam_config.get("lat", 0.0)          # GPS latitude
+    cam_lng   = cam_config.get("lng", 0.0)          # GPS longitude
 
     # Each thread loads its own model instances.
     # Required because ByteTrack persist=True keeps internal state per model object.
@@ -547,7 +554,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
     trash_model  = YOLO(r"ml_pipeline\weights\taco_8s_v3.pt")
     print(f"[{camera_id}] Models loaded. Starting capture...")
 
-    ctx           = CameraContext(camera_id, cam_label, cam_phone)
+    ctx           = CameraContext(camera_id, cam_label, cam_phone, cam_lat, cam_lng)
     stream_sender = StreamSender(camera_id)
 
     vid = cv2.VideoCapture(source)
@@ -574,6 +581,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
         # Dynamic priority: skip_frames adjusts based on recent trash activity.
         # HIGH (active scene) = every frame. LOW (idle camera) = every 8th frame.
         current_skip = get_camera_skip(ctx)
+        current_skip = get_geo_skip(current_skip, ctx.cam_lat, ctx.cam_lng)
         if ctx.frame_count % current_skip == 0:
             ctx.last_drawn_persons  = []
             ctx.last_drawn_vehicles = []
@@ -626,7 +634,7 @@ def camera_worker(cam_config, frame_queues, stop_event):
                 threading.Thread(
                     target=post_incident,
                     args=(event,),
-                    daemon=True,
+                    daemon=False,  # must not be daemon — WhatsApp alert needs time to finish
                     name=f"IncidentPost-{camera_id}",
                 ).start()
 

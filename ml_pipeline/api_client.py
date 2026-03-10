@@ -53,28 +53,46 @@ def post_incident(event: dict) -> bool:
     except Exception as e:
         print(f"[API] ✗ Unexpected error: {e}")
 
-    # ── 2 & 3. WhatsApp alert ─────────────────────────────────
-    phone_no = event.get("phone_no")
-    if phone_no:
-        _send_whatsapp_alert(event, phone_no)
+    # ── WhatsApp alert ─────────────────────────────────
+    # Find the nearest municipality office to this camera and alert them.
+    # Falls back to the camera's own Ph_no if no offices are configured.
+    try:
+        from geo import nearest_office
+        cam_lat = event.get("cam_lat", 0.0)
+        cam_lng = event.get("cam_lng", 0.0)
+        office  = nearest_office(cam_lat, cam_lng)
+    except Exception:
+        office = None
+
+    if office:
+        print(f"[GEO] Nearest office: {office['name']} — alerting {office['Ph_no']}")
+        _send_whatsapp_alert(event, office["Ph_no"], office["name"])
     else:
-        print("[WA] No Ph_no configured for this camera — skipping alert")
+        # for legacy
+        phone_no = event.get("phone_no")
+        if phone_no:
+            _send_whatsapp_alert(event, phone_no, "")
+        else:
+            print("[WA] No office or Ph_no configured — skipping alert")
 
     return backend_ok
 
 
-def _send_whatsapp_alert(event: dict, phone_no: str):
+def _send_whatsapp_alert(event: dict, phone_no: str, office_name: str = ""):
     image_path = event.get("full_frame_path")
     image_url  = None
 
     if image_path and IMGBB_AVAILABLE:
         image_url = upload_image(image_path)
 
+    # Use office name in message if available so recipient knows which office is being alerted
+    label = f"{event.get('camera_label', '')} → {office_name}" if office_name else event.get("camera_label", "")
+
     if WA_AVAILABLE:
         send_whatsapp_alert(
             to_number    = phone_no,
             camera_id    = event.get("camera_id",    "CAM_??"),
-            camera_label = event.get("camera_label", ""),
+            camera_label = label,
             trash_type   = event.get("label",        "Unknown"),
             suspect_type = event.get("suspect_type", "person"),
             confidence   = event.get("confidence",   0.0),
