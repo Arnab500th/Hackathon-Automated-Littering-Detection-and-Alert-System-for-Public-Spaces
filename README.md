@@ -1,388 +1,419 @@
-# Automated Littering Detection & Alert System
-# Hackathon Prototype | AI-powered Real-time Urban Surveillance
+# TRACE — Trash Recognition and Automated Capture Engine
+### Hackathon Prototype | AI-Powered Real-Time Urban Litter Detection & Alert System
 
+---
 
-# 🧠 Project Overview
+## Project Overview
 
-**Automated Littering Detection & Alert System for Public Spaces** is an 
-AI-powered real-time surveillance solution that analyzes CCTV and camera feeds 
-to detect littering behavior, identify offenders, and generate instant alerts 
-with legally usable visual and textual evidence.
+**TRACE** is an end-to-end AI surveillance pipeline that monitors live camera feeds, detects littering behaviour, identifies offenders (person or vehicle), and dispatches instant WhatsApp alerts with visual evidence to the nearest municipal authority — automatically.
 
-The system leverages:
-- Deep Learning
-- Multi-object tracking
-- State-machine logic
-- OCR
-- Real-time streaming
-- Live analytics dashboard
+The system integrates deep learning, multi-object tracking, state-machine event logic, geofencing, OCR, real-time streaming, and a live analytics dashboard into a single deployable pipeline.
 
-This project was developed as a **Hackathon Prototype** and demonstrates a 
-complete **end-to-end AI + Backend + Dashboard pipeline**.
+**Target Environments:**
+Municipal surveillance · Smart cities · Railway stations · Markets & public roads · Campuses · Urban monitoring
 
-🎯 Target Areas:
-- Municipal surveillance
-- Smart cities
-- Railway stations
-- Markets & public roads
-- Campuses
-- Urban monitoring systems
+---
 
+## System Architecture
 
-# 🔁 System Architecture
-
- Cameras (USB / RTSP / Video Files)  
-            ↓  
- Multi-Threaded Frame Capture  
-            ↓  
-     YOLOv8 Detection  
-   (Person + Litter + Vehicle)  
-            ↓  
-     ByteTrack Tracking  
-            ↓  
-      State Machine  
- (Carry → Drop → Stationary → Abandon)  
-            ↓  
- Evidence Capture + EasyOCR  
-            ↓  
-     FastAPI Backend  
-            ↓  
-    Database + Analytics  
-            ↓  
-   MJPEG Live Streaming  
-            ↓  
-     Admin Dashboard  
-
-
-# ⚙️ Processing Pipeline
-
- Capture Frame
-       ↓
- Resize & Preprocess
-       ↓
- YOLOv8 Detection
- (Person + Trash + Vehicle)
-       ↓
- ByteTrack Tracking
-       ↓
- State Machine Logic
-       ↓
- Littering Event Decision
-       ↓
- Evidence Capture + OCR
-       ↓
- Backend Logging + Dashboard Update
-
-
-# 🚀 Key Features
-
-✅ Multi-camera real-time processing  
-✅ Threaded streaming pipeline (zero FPS impact)  
-✅ YOLOv8-based object detection  
-✅ ByteTrack multi-object tracking  
-✅ State-machine based littering detection logic  
-✅ Automatic evidence capture  
-✅ License plate OCR (EasyOCR)  
-✅ FastAPI backend  
-✅ SQLite database logging  
-✅ Real-time analytics dashboard  
-✅ MJPEG live video streaming  
-✅ Per-camera statistics  
-✅ Real-time charts & graphs  
-✅ Cost-effective AI surveillance solution  
-
-
-# 🧠 Tech Stack
-
-# 🔬 ML & Computer Vision
-
-| Component        | Technology |
-|------------------|-------------|
-| Detection Model  | YOLOv8s |
-| Dataset          | TACO |
-| Tracking         | ByteTrack |
-| OCR              | EasyOCR |
-| Image Processing | OpenCV |
-| Training         | PyTorch + CUDA |
-
-
-# 🧩 Backend
-
-| Component | Technology |
-|------------|-------------|
-| API Server | FastAPI |
-| Database   | SQLite |
-| Streaming  | MJPEG |
-| Language   | Python |
-
-
-# 🖥️ Frontend Dashboard
-
-| Component | Technology |
-|-------------|--------------|
-| UI          | HTML + CSS |
-| Logic       | JavaScript |
-| Charts      | Chart.js |
-| Streaming   | MJPEG |
-
-
-# 📊 Performance Benchmarks
-
-# Test Machine:
-# CPU: Intel i5-12450HX
-# GPU: NVIDIA RTX 2050 (4GB VRAM)
-# RAM: 12GB
-
-| Cameras | FPS | Notes |
-|-----------|------|--------|
-| 1 | ~28 FPS | Real-time |
-| 3 | ~20 FPS | Stable |
-| 4 | ~16 FPS | GPU bound |
-
-✔ Multi-camera stable performance  
-✔ Fully real-time detection  
-
-
-# 📁 Folder Structure
-
-LitterWatch/  
-│  
-├── backend/  
-│    ├── main.py  
-│    ├── DBMS.py  
-│    ├── database.py  
-│    └── main.db  
-│  
-├── frontend/  
-│   ├── index.html  
-│   ├── app.js  
-│   └── styles.css  
-│  
-├── ml_pipeline/  
-│   ├── detect.py  
-│   ├── api_client.py  
-│   ├── config.py  
-│   └── models/  
-│  
-├── docs/  
-├── test/  
-├── training/  
-│  
-└── README.md  
-
-
-# ⚡ Installation & Setup
-
-# 1️⃣ Clone Repository
 ```
-git clone https://github.com/yourusername/LitterWatch.git
-cd LitterWatch
+Cameras (USB / RTSP / Video Files)
+            ↓
+  Multi-Threaded Frame Capture
+  (one thread per camera, daemon=False)
+            ↓
+  Dynamic Priority System
+  HIGH / MEDIUM / LOW skip control
+  + Geofence sensitivity floor
+            ↓
+     YOLOv8 Detection
+  Trash model  ←  every frame
+  Person model ←  every Nth frame (priority-controlled)
+            ↓
+     ByteTrack Tracking
+  (per-model, per-thread — no shared state)
+            ↓
+      State Machine
+  UNKNOWN → CARRYING → SEPARATION → STATIONARY → ALERTED
+                                  ↘ CANCELLED (owner returns)
+            ↓
+  Evidence Capture + EasyOCR (vehicles)
+            ↓
+  Nearest Municipality Office Routing
+  (Haversine distance to MUNICIPALITY_OFFICES)
+            ↓
+  imgbb Upload → Twilio WhatsApp Alert
+  (with zone sensitivity label)
+            ↓
+     FastAPI Backend
+  SQLite · MJPEG Streaming · REST API
+            ↓
+     Admin Dashboard
+  Live feed · Incidents · Stats · Priority badges · Zone badges
 ```
 
-# 2️⃣ Create Virtual Environment
+---
+
+## Key Features
+
+- Multi-camera real-time processing (threaded, one worker per camera)
+- Dynamic priority system — HIGH / MEDIUM / LOW frame skip per camera based on recent activity
+- Geofencing — cameras near schools, stations, or heritage sites never drop below MEDIUM priority
+- Nearest-office alert routing — WhatsApp sent to the closest municipality ward office using Haversine GPS distance, not a hardcoded number
+- Zone sensitivity labelling — alerts flag whether the incident occurred in a protected zone
+- State-machine based littering detection — confirms events only after carry → separation → stationary → abandon sequence
+- ByteTrack multi-object tracking with persistent IDs across frames
+- Owner identity verification — ByteTrack ID matching prevents passerby false cancellations
+- EasyOCR license plate recognition for vehicle offenders (Indian format validation)
+- Evidence snapshots — cropped offender image + full annotated frame saved automatically
+- imgbb image hosting — snapshots uploaded to public URL for Twilio media attachment
+- FastAPI backend with SQLite — incidents, vehicles, trash log tables
+- MJPEG live streaming — zero re-encode, event-driven frame push
+- Dashboard with live priority badges and zone sensitivity indicators per camera
+- 7-day history charts, per-camera stats, trash type breakdown
+
+---
+
+## Tech Stack
+
+### ML & Computer Vision
+
+| Component        | Technology                        |
+|------------------|-----------------------------------|
+| Person/Vehicle   | YOLOv8s (COCO pretrained)         |
+| Trash Detection  | YOLOv8s fine-tuned on TACO        |
+| Tracking         | ByteTrack (persist=True per thread)|
+| OCR              | EasyOCR (lazy init, GPU=False)    |
+| Image Processing | OpenCV                            |
+| Training         | PyTorch + CUDA                    |
+
+### Backend
+
+| Component      | Technology           |
+|----------------|----------------------|
+| API Server     | FastAPI + Uvicorn    |
+| Database       | SQLite (SQLAlchemy)  |
+| Streaming      | MJPEG (event-driven) |
+| Alerts         | Twilio WhatsApp API  |
+| Image Hosting  | imgbb API            |
+| Language       | Python 3.11+         |
+
+### Frontend Dashboard
+
+| Component  | Technology       |
+|------------|------------------|
+| UI         | HTML + CSS       |
+| Logic      | JavaScript       |
+| Charts     | Chart.js         |
+| Streaming  | MJPEG (img src)  |
+| Fonts      | JetBrains Mono   |
+
+---
+
+## Performance Benchmarks
+
+**Test Machine:** Intel i5-12450HX · NVIDIA RTX 2050 4GB · 12GB RAM
+
+| Cameras | Avg FPS | Priority State | Notes                          |
+|---------|---------|----------------|--------------------------------|
+| 1       | ~28 FPS | HIGH           | Real-time                      |
+| 3       | ~20 FPS | HIGH           | Stable                         |
+| 4       | ~16 FPS | HIGH           | GPU bound                      |
+| 6–8     | ~14 FPS | MEDIUM/LOW mix | Most cameras idle, skip=5 or 8 |
+
+**Priority system impact on inference load:**
+
+| Priority | Person skip | Inferences/cam/sec | Max cameras (ceiling 112/s) |
+|----------|-------------|--------------------|-----------------------------|
+| HIGH     | every frame | ~60                | 4 (matches hardware limit)  |
+| MEDIUM   | every 5th   | ~40                | 6–7                         |
+| LOW      | every 8th   | ~35                | 8–9                         |
+
+Trash model runs every frame regardless of priority — only person detection is skipped.
+Cameras in HIGH_SENSITIVITY_ZONES are floored at MEDIUM and never drop to LOW.
+
+---
+
+## Folder Structure
+
 ```
+TRACE/
+│
+├── backend/
+│   ├── main.py          FastAPI app, all REST endpoints, MJPEG streaming
+│   ├── DBMS.py          SQLAlchemy models (incidents, vehicles, trash_log)
+│   ├── database.py      SQLite engine + session factory
+│   ├── model.py         Pydantic schemas
+│   └── main.db          SQLite database
+│
+├── frontend/
+│   ├── index.html       Dashboard shell, page structure
+│   ├── app.js           All fetch logic, charts, priority/zone badges
+│   └── style.css        Dark theme, priority badge colours, zone badge
+│
+├── ml_pipeline/
+│   ├── detect.py        Main detection loop, state machine, camera workers
+│   ├── api_client.py    Backend POST, nearest-office routing, WhatsApp dispatch
+│   ├── config.py        Camera registry, municipality offices, sensitivity zones,
+│   │                    detection thresholds, priority windows
+│   ├── geo.py           Haversine distance, nearest_office(), 
+│   │                    in_high_sensitivity_zone(), get_geo_skip()
+│   ├── imgbb_upload.py  Upload snapshot to imgbb, return public HTTPS URL
+│   ├── whatsapp_alert.py Twilio WhatsApp message builder + sender
+│   ├── ocr_module.py    EasyOCR plate reader, Indian format validation
+│   ├── .env             API keys (Twilio, imgbb) — never commit
+│   └── weights/
+│       ├── yolov8s.pt
+│       └── taco_8s_v3.pt
+│
+├── data/
+│   ├── snapshots/
+│   │   ├── persons/     Cropped offender images
+│   │   ├── vehicles/    Cropped vehicle images
+│   │   └── full/        Full annotated frames
+│   └── test_videos/
+│
+├── docs/
+│   └── screenshots/
+│
+└── README.md
+```
+
+---
+
+## Configuration — config.py
+
+All deployment-specific values live in `ml_pipeline/config.py`. Nothing else needs editing for a new deployment.
+
+```python
+# Cameras — add lat/lng for geofencing and office routing
+CAMERA_CONFIG = [
+    {"id": "CAM_01", "source": 0,        "label": "Front Gate",    "lat": 22.5626, "lng": 88.3511},
+    {"id": "CAM_02", "source": "rtsp://…","label": "Park Entrance", "lat": 22.5553, "lng": 88.3514},
+]
+
+# Municipality offices — alerts routed to nearest by Haversine distance
+MUNICIPALITY_OFFICES = [
+    {"name": "Ward 1 Office", "Ph_no": "+91XXXXXXXXXX", "lat": 22.5679, "lng": 88.3468},
+]
+
+# Protected zones — cameras within radius_m never drop below MEDIUM priority
+HIGH_SENSITIVITY_ZONES = [
+    {"name": "School Zone",     "lat": 22.5548, "lng": 88.3522, "radius_m": 200},
+    {"name": "Railway Station", "lat": 22.5448, "lng": 88.3426, "radius_m": 300},
+]
+
+# Priority windows
+PRIORITY_HIGH_WINDOW   = 5    # seconds after trash detection = HIGH
+PRIORITY_MEDIUM_WINDOW = 30   # seconds after = MEDIUM, beyond = LOW
+```
+
+**To add a new camera:** add one dict to `CAMERA_CONFIG` with correct `lat`/`lng`. Alert routing and zone sensitivity are automatic.
+
+**To add a new municipality office:** add one dict to `MUNICIPALITY_OFFICES`. No camera config changes needed — nearest-office routing recalculates automatically.
+
+---
+
+## WhatsApp Alert Format
+
+```
+LITTER ALERT - CAM_01 | Esplanade Metro Gate → Ward 62 Office
+────────────────────────────────
+Trash:      Bottle
+Offender:   PERSON
+Confidence: 83%
+On ground:  14.2s
+Zone:       WARNING School Zone
+Time:       14:32:07
+[snapshot image attached]
+```
+
+- `camera_label → office_name` tells the officer exactly which camera fired and which ward was notified
+- `Zone: WARNING <name>` appears when the camera is inside a HIGH_SENSITIVITY_ZONE, `Standard` otherwise
+- Snapshot is uploaded to imgbb first, public HTTPS URL passed to Twilio as media attachment
+- Alert thread is `daemon=False` — process waits for alert to complete even when video file source ends
+
+---
+
+## Installation & Setup
+
+### 1. Clone Repository
+```bash
+git clone https://github.com/yourusername/TRACE.git
+cd TRACE
+```
+
+### 2. Create Virtual Environment
+```bash
 python -m venv venv
-```
-
-# 3️⃣ Activate Environment
-
 # Windows
-```
 venv\Scripts\activate
-```
 # Linux / Mac
-```
 source venv/bin/activate
 ```
 
-# 4️⃣ Install Dependencies
-```
+### 3. Install Dependencies
+```bash
 pip install -r requirements.txt
 ```
 
-# ▶️ Running The System
+### 4. Configure API Keys
 
-# Start Backend Server
+Create `ml_pipeline/.env`:
 ```
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+IMGBB_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Twilio sandbox note: each recipient must send the sandbox join code to `+14155238886` on WhatsApp once before receiving alerts.
+
+### 5. Edit config.py
+Set real camera sources, GPS coordinates, municipality office phone numbers, and sensitivity zones.
+
+---
+
+## Running The System
+
+**Start backend:**
+```bash
 uvicorn backend.main:app --reload
 ```
 
-# Start Detection Pipeline
-```
+**Start detection pipeline:**
+```bash
 python ml_pipeline/detect.py
 ```
 
-# Open Dashboard
-
-Open: frontend/index.html  
-or  
+**Open dashboard:**
+```
 http://localhost:8000
+```
 
+**Test WhatsApp alert standalone** (no backend or detect.py needed):
+```bash
+cd ml_pipeline
+python test_whatsapp.py
+```
 
-# 📦 Dataset
+---
 
-Primary Dataset Used:
+## Detection State Machine
 
-🗑️ **TACO (Trash Annotations in Context)**  
-- Public dataset for waste detection  
-- Diverse trash object classes  
-- Used for custom YOLOv8 training  
+Each tracked trash object moves through states independently:
 
+```
+UNKNOWN    → trash detected, no owner assigned yet
+CARRYING   → person/vehicle within CARRY_DISTANCE (150px) or overlapping
+SEPARATION → owner moved beyond CARRY_DISTANCE, timer started
+STATIONARY → object hasn't moved >15px for 30+ frames since separation
+ALERTED    → owner beyond ABANDON_DISTANCE (250px) — confirmed litter event
+CANCELLED  → owner returned within CANCEL_DISTANCE (100px) — false alarm cleared
+```
 
-# 🧾 Output & Evidence
+Owner identity is verified using ByteTrack IDs — a different person passing near the stationary object does not trigger CANCELLED. Falls back to positional distance if IDs are unavailable (first frame of new track).
 
-System automatically stores:
+---
 
-📸 Evidence images  
-🔤 OCR extracted license plate text  
-🗄️ Database logs  
-📊 Analytics  
-🎥 Live MJPEG streams  
+## Geofencing Logic — geo.py
 
+All geographic logic is in `ml_pipeline/geo.py`:
 
-# ⚠️ Limitations & Challenges
+**`haversine(lat1, lng1, lat2, lng2)`** — returns distance in metres using the curved-earth formula. Raw degree subtraction is not used because 1 degree ≈ 111km, making `radius_m` comparisons completely incorrect without conversion.
 
-⚠️ Reduced detection in low-light & adverse weather  
-⚠️ Camera angle variability  
-⚠️ OCR issues on blurred plates  
-⚠️ GPU memory limitations at scale  
-⚠️ Dataset size constraints for hand-object detection  
+**`nearest_office(cam_lat, cam_lng)`** — finds the closest `MUNICIPALITY_OFFICES` entry by Haversine distance. Replaces per-camera phone numbers — any camera anywhere routes correctly with zero manual assignment.
 
+**`in_high_sensitivity_zone(cam_lat, cam_lng)`** — returns zone name if camera is within `radius_m` metres of any `HIGH_SENSITIVITY_ZONES` centre, else None.
 
-# 🔮 Future Scope
+**`get_geo_skip(current_skip, cam_lat, cam_lng)`** — overrides LOW skip (8) to MEDIUM skip (5) for cameras in sensitive zones. HIGH is never touched.
 
-🚀 WebRTC ultra-low latency streaming  
-🚀 Edge AI deployment (Jetson Nano / Orin)  
-🚀 Cloud-scale multi-city monitoring  
-🚀 Heatmap-based violation analysis  
-🚀 Smart city integration  
-🚀 Legal-grade evidence storage  
-🚀 Automated challan generation  
+---
 
+## Dashboard Features
 
-# 🖼️ Screenshots
+**Dashboard tab:** Today's stat cards · Recent incidents table with snapshots · Trash type pie chart · Active cameras panel with priority + zone badges · 7-day history bar chart
 
-## Dash Board screenshots
+**Live Stats tab:** Per-camera cards showing live stream thumbnail, today/all-time breakdown, priority badge (GREEN=HIGH / AMBER=MEDIUM / GREY=LOW), zone badge (orange, only shown if in sensitivity zone)
 
-DashBoard.png  
+**Live Feed tab:** MJPEG streams for all cameras · Add Camera prompt for runtime additions
 
-<img width="1919" height="874" alt="DashBoard" src="docs\screenshots\DashBoard.png" />
-Incidents.png  
+**Incidents tab:** Full incident log with snapshots (click to enlarge lightbox)
 
-<img width="1916" height="874" alt="incidents" src="docs\screenshots\incidents.png" />
-Live Feed.png  
+**Vehicles tab:** Repeat offender tracking by license plate with incident count
 
-<img width="1916" height="874" alt="incidents" src="docs\screenshots\Live Feed.png" />
+---
 
-## Program
-Detect.png  
+## Limitations
 
-<img width="1916" height="874" alt="incidents" src="docs\screenshots\Detect.png" />
-## Full Image Snap Shots
-full.jpg  
+- Reduced detection accuracy in low light and adverse weather
+- OCR accuracy drops on blurred or angled license plates
+- GPU memory limits concurrent camera count (~4 cameras at full load on RTX 2050)
+- `seen_trash_ids` set not pruned over very long sessions (memory grows slowly)
+- Twilio sandbox requires recipient join code before first alert
 
-<img width="478" height="850" alt="incidents" src="docs\screenshots\full.jpg" />
-full2.jpg  
+---
 
-<img width="478" height="850" alt="incidents" src="docs\screenshots\full2.jpg" />
-full3.jpg  
+## Future Scope
 
-<img width="478" height="850" alt="incidents" src="docs\screenshots\full3.jpg" />
+- WebRTC ultra-low latency streaming (replace MJPEG)
+- Edge AI deployment — Jetson Orin Nano (one-line change: `YOLO("weights/yolov8s.engine")`)
+- RL-based adaptive priority — learn optimal thresholds per camera from historical patterns
+- Content-aware frame differencing — skip trash model on truly static frames
+- Automated challan generation with legal-grade evidence packaging
+- Cloud-scale multi-city deployment (Render backend + Vercel frontend already documented)
+- MIN_CARRY_FRAMES passerby fix — reject CARRYING events that lasted fewer than 8 frames
 
-## Offenders SnapShots  
-culprit_1.jpg  
+---
 
-<img width="158" height="383" alt="incidents" src="docs\screenshots\culprit_1.jpg" />
-culprit_2.jpg  
+## Dataset Credits
 
-<img width="149" height="320" alt="incidents" src="docs\screenshots\culprit_2.jpg" />  
+**TACO** — Trash Annotations in Context  
+https://tacodataset.org — used for fine-tuning the trash detection model
 
-## Vehicles  
+**COCO** — Common Objects in Context  
+https://cocodataset.org — used via pretrained YOLOv8 weights for person and vehicle detection
 
-car.jpg  
-<img width="265" height="347" alt="incidents" src="docs\screenshots\car.jpg" />
+---
 
+## Research References
 
-# 🏆 Deployment Status
+- SAWN: A Smart Alert and Warning Network for Littering Surveillance — *Nature Scientific Reports, 2025*  
+  https://www.nature.com/articles/s41598-024-77118-x
 
-### Currently runs on Local not deployed
+- Real-time Detection and Monitoring of Public Littering Behavior Using Deep Learning  
+  https://www.researchgate.net/publication/388326795
 
-🚧 Hackathon Prototype  
-✔ Fully functional  
-✔ Real-time capable  
-✔ Scalable architecture  
+- Real-Time Litter Detection System Using Deep Learning Techniques — *IRE Journals*  
+  https://www.irejournals.com/formatedpaper/1712601.pdf
 
+- Intelligent Garbage Detection and Alert System — *SAMVAKTI Journals*  
+  https://www.samvaktijournals.com/system/files/sjrit/2021.02.19/intelligent_garbage_detection_and_alert_system.pdf
 
-# 👨‍💻 Team
+- AI-Based Camera Systems for Roadside Litter Detection and Offender Identification — *IJERT*  
+  https://www.ijert.org/ai-based-camera-systems-for-roadsidel-itter-detection-and-offender-identification-ijertv15is010642
 
-👤 **Arnab Datta** — *Team Leader*  
-ML Pipeline Architecture • Model Training • Detection Logic • System Integration • Testing • Project Planning  
+---
 
-👤 **Sumit Paul** — *Backend Engineer*  
-FastAPI Backend • Database Design • API Development • Data Handling  
+## Team
 
-👤 **Deepraj Paul** — *Frontend & Documentation Lead*  
-UI/UX Design • Dashboard Development • Project Documentation • Presentation Design  
+**Arnab Datta** — Team Leader  
+ML Pipeline · Model Training · Detection Logic · State Machine · Geofencing · System Integration
 
-📍 India  
+**Sumit Paul** — Backend Engineer  
+FastAPI Backend · Database Design · API Development · Streaming
 
-**Core Technologies:**
+**Deepraj Paul** — Frontend & Documentation Lead  
+Dashboard · UI/UX · Documentation · Presentation
 
-YOLOv8 · ByteTrack · EasyOCR · FastAPI · OpenCV · Chart.js  
+📍 India
 
-# 📦 Dataset Credits
+---
 
-• **TACO** — Trash Annotations in Context Dataset  
-  https://tacodataset.org  
-  Used for training the trash detection model.
+## License
 
-• **COCO** — Common Objects in Context Dataset  
-  https://cocodataset.org  
-  Used via pretrained YOLOv8 weights for person & vehicle detection.
+MIT License — free for research and academic use.
 
-# 📚 Research References & Inspiration
+---
 
-This project is inspired by and aligned with current academic research in automated litter detection, 
-computer vision–based surveillance, and intelligent environmental monitoring systems. The design of the 
-detection pipeline, tracking strategy, and state-machine-based decision logic is guided by the following works:
-
-• **SAWN: A Smart Alert and Warning Network for Littering Surveillance**  
-  Nature Scientific Reports, 2025  
-  https://www.nature.com/articles/s41598-024-77118-x  
-
-• **Real-time Detection and Monitoring of Public Littering Behavior Using Deep Learning for a Sustainable Environment**  
-  https://www.researchgate.net/publication/388326795_Real_time_detection_and_monitoring_of_public_littering_behavior_using_deep_learning_for_a_sustainable_environment  
-
-• **Real-Time Litter Detection System Using Deep Learning Techniques**  
-  IRE Journals  
-  https://www.irejournals.com/formatedpaper/1712601.pdf  
-
-• **Intelligent Garbage Detection and Alert System**  
-  SAMVAKTI Journals  
-  https://www.samvaktijournals.com/system/files/sjrit/2021.02.19/intelligent_garbage_detection_and_alert_system.pdf  
-
-• **AI-Based Camera Systems for Roadside Litter Detection and Offender Identification**  
-  IJERT  
-  https://www.ijert.org/ai-based-camera-systems-for-roadsidel-itter-detection-and-offender-identification-ijertv15is010642  
-
-These studies validate the feasibility of AI-driven litter surveillance and helped shape the 
-architecture, detection logic, and system workflow used in this project.  
-
-# 📜 License
-
-**MIT License** — Free for research & academic use.
-
-
-# ⭐ Final Note
-
-This project demonstrates a **complete real-time AI surveillance pipeline** 
-integrating:
-
-✔ Deep Learning  
-✔ Tracking  
-✔ Event logic  
-✔ OCR  
-✔ Backend analytics  
-✔ Live dashboard  
-
-Designed for **real-world municipal-scale deployment** 🚀
+*TRACE demonstrates a complete real-time AI surveillance pipeline — detection, tracking, event logic, OCR, geofenced alerting, and live analytics — designed for real-world municipal-scale deployment.*
