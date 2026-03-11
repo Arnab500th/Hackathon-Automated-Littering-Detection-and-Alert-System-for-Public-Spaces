@@ -1,4 +1,4 @@
-# TRACE — Trash Recognition and Automated Capture Engine
+# TRACE — Trash Recognition and Automated Civic Enforcement
 ### Hackathon Prototype | AI-Powered Real-Time Urban Litter Detection & Alert System
 
 ---
