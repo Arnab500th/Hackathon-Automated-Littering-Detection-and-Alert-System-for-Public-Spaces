@@ -376,7 +376,7 @@ https://cocodataset.org — used via pretrained YOLOv8 weights for person and ve
 
 ---
 
-## Research References
+## Research Sources
 
 - SAWN: A Smart Alert and Warning Network for Littering Surveillance — *Nature Scientific Reports, 2025*  
   https://www.nature.com/articles/s41598-024-77118-x
@@ -401,7 +401,7 @@ https://cocodataset.org — used via pretrained YOLOv8 weights for person and ve
 ML Pipeline · Model Training · Detection Logic · State Machine · Geofencing · System Integration
 
 **Sumit Paul** — Backend Engineer  
-FastAPI Backend · Database Design · API Development · Streaming
+FastAPI Backend · Database Design · API Development · Streaming 
 
 **Deepraj Paul** — Frontend & Documentation Lead  
 Dashboard · UI/UX · Documentation · Presentation
